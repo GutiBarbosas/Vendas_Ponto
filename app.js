@@ -1,7 +1,7 @@
 /* ==========================================================================
-   Dashboard de Registro e Venda — leitura direta de data/BASE.csv
+   Dashboard de Registro e Venda — leitura direta de BASE.csv (mesma pasta)
    Sem frameworks, sem build tools. Para atualizar os dados, basta substituir
-   o arquivo data/BASE.csv por uma nova exportação da planilha, mantendo as
+   o arquivo BASE.csv por uma nova exportação da planilha, mantendo as
    colunas: NOME,LOJA,DT,DIA,STATUS_RH,VENDA,GERENTE,SUPER
    ========================================================================== */
 
@@ -298,8 +298,8 @@ async function init() {
   const loadedChip = document.getElementById('loadedChip');
 
   try {
-    const res = await fetch('data/BASE.csv', { cache: 'no-store' });
-    if (!res.ok) throw new Error('Falha ao carregar data/BASE.csv');
+    const res = await fetch('BASE.csv', { cache: 'no-store' });
+    if (!res.ok) throw new Error('Falha ao carregar BASE.csv');
     const text = await res.text();
     state.rows = csvToObjects(text);
     state.filtered = [...state.rows];
