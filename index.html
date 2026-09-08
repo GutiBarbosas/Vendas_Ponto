@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Acompanhamento de Registro e Venda</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="app">
+
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="brand-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 2L4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="brand-text">
+        <strong>Registro &amp; Venda</strong>
+        <span>Rede de Farmácias</span>
+      </div>
+      <button class="collapse-btn" id="collapseBtn" aria-label="Recolher menu">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+
+    <nav class="nav">
+      <div class="nav-group-label">Painel</div>
+      <a class="nav-item active" href="#">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="7" height="9" rx="1.5" stroke="currentColor" stroke-width="1.6"/><rect x="14" y="3" width="7" height="5" rx="1.5" stroke="currentColor" stroke-width="1.6"/><rect x="14" y="12" width="7" height="9" rx="1.5" stroke="currentColor" stroke-width="1.6"/><rect x="3" y="16" width="7" height="5" rx="1.5" stroke="currentColor" stroke-width="1.6"/></svg>
+        <span>Registro de Vendas</span>
+      </a>
+
+      <div class="nav-group-label">Organização</div>
+      <div class="nav-item static">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.2" stroke="currentColor" stroke-width="1.6"/><path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <span>Supervisor → Gerente</span>
+      </div>
+      <div class="nav-item static">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M4 21V9l8-5 8 5v12" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M9 21v-6h6v6" stroke="currentColor" stroke-width="1.6"/></svg>
+        <span>Loja → Colaborador</span>
+      </div>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="source-note">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 19.5V6a2 2 0 0 1 2-2h9l5 5v10.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+        <span>Fonte: planilha BASE.xlsx</span>
+      </div>
+    </div>
+  </aside>
+
+  <div class="main">
+
+    <header class="topbar">
+      <div class="topbar-left">
+        <button class="menu-toggle" id="menuToggle" aria-label="Abrir menu">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+        <div class="crumbs">
+          <span class="crumb-muted">Registro &amp; Venda</span>
+          <span class="crumb-sep">/</span>
+          <span>Acompanhamento diário</span>
+        </div>
+        <h1>Registro e Venda por Colaborador</h1>
+      </div>
+      <div class="topbar-right">
+        <div class="loaded-chip" id="loadedChip">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M12 8v4l3 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/></svg>
+          <span id="loadedText">Carregando dados…</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="content">
+
+      <section class="panel filters-panel" aria-label="Filtros">
+        <div class="filters-head">
+          <h2>Filtros</h2>
+          <button class="btn-ghost" id="clearFilters">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            Limpar filtros
+          </button>
+        </div>
+        <div class="filters-grid">
+          <div class="field">
+            <label for="fData">Data</label>
+            <select id="fData"><option value="">Todas</option></select>
+          </div>
+          <div class="field">
+            <label for="fDia">Dia</label>
+            <select id="fDia"><option value="">Todos</option></select>
+          </div>
+          <div class="field">
+            <label for="fSuper">Supervisor</label>
+            <select id="fSuper"><option value="">Todos</option></select>
+          </div>
+          <div class="field">
+            <label for="fGerente">Gerente</label>
+            <select id="fGerente"><option value="">Todos</option></select>
+          </div>
+          <div class="field">
+            <label for="fLoja">Loja</label>
+            <select id="fLoja"><option value="">Todas</option></select>
+          </div>
+          <div class="field">
+            <label for="fStatus">Status</label>
+            <select id="fStatus"><option value="">Todos</option></select>
+          </div>
+          <div class="field field-search">
+            <label for="fColab">Colaborador</label>
+            <div class="search-input">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/><path d="M21 21l-4.3-4.3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+              <input type="text" id="fColab" placeholder="Buscar por nome…" autocomplete="off">
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel table-panel" aria-label="Tabela de registros">
+        <div class="table-head">
+          <div>
+            <h2>Registros</h2>
+            <p class="table-sub" id="rowCount">—</p>
+          </div>
+          <div class="table-actions">
+            <button class="btn-ghost" id="exportCsv">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+              Exportar CSV
+            </button>
+          </div>
+        </div>
+
+        <div class="table-scroll">
+          <table id="dataTable">
+            <thead>
+              <tr>
+                <th data-key="DT" class="sortable">Data</th>
+                <th data-key="DIA" class="sortable">Dia</th>
+                <th data-key="NOME" class="sortable">Colaborador</th>
+                <th data-key="LOJA" class="sortable">Loja</th>
+                <th data-key="GERENTE" class="sortable">Gerente</th>
+                <th data-key="SUPER" class="sortable">Supervisor</th>
+                <th data-key="STATUS_RH" class="sortable">Status</th>
+                <th data-key="VENDA" class="sortable num">Venda</th>
+              </tr>
+            </thead>
+            <tbody id="tableBody"></tbody>
+          </table>
+        </div>
+
+        <div class="empty-state" id="emptyState" hidden>
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M21 21l-4.3-4.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <p>Nenhum registro encontrado para os filtros selecionados.</p>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
