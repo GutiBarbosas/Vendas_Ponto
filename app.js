@@ -4,7 +4,7 @@
    abaixo a cada carregamento da página; para atualizar, basta editar a
    planilha de origem — nenhuma alteração de código é necessária.
    Colunas esperadas (aba BASE/VENDA): NOME,LOJA,DT,DIA,STATUS_RH,VENDA,GERENTE,SUPER
-   Colunas esperadas (aba GERAL/COMPARATIVO): NOME,ADMISSÃO,FUNÇÃO,LOJA,BANCO,MÊS
+   Colunas esperadas (aba GERAL/COMPARATIVO): NOME,ADMISSÃO,FUNÇÃO,LOJA,BANCO,MÊS,GERENTE,SUPERVISOR
    ========================================================================== */
 
 const SHEET_URLS = {
@@ -31,12 +31,11 @@ const MES_LABELS = {
   '09': 'Setembro', '10': 'Outubro', '11': 'Novembro', '12': 'Dezembro'
 };
 
-const COL = { NOME: 'NOME', ADMISSAO: 'ADMISSÃO', FUNCAO: 'FUNÇÃO', LOJA: 'LOJA', BANCO: 'BANCO', MES: 'MÊS' };
+const COL = { NOME: 'NOME', ADMISSAO: 'ADMISSÃO', FUNCAO: 'FUNÇÃO', LOJA: 'LOJA', BANCO: 'BANCO', MES: 'MÊS', GERENTE: 'GERENTE', SUPER: 'SUPERVISOR' };
 
 const stateM = {
   rows: [],
-  filters: { LOJA: '', MES: '' },
-  selectedNome: ''
+  supervisor: ''
 };
 
 const state = {
@@ -203,93 +202,113 @@ function applySort() {
   renderTable();
 }
 
-/* ---------------- Acompanhamento Mensal: filtros e renderização ---------------- */
+/* ---------------- Acompanhamento Mensal: visão hierárquica ---------------- */
+/* Supervisor → Lojas (expansível) → Colaboradores (expansível) → Evolução mensal */
 
-function refreshColabOptions() {
-  const f = stateM.filters;
-  let rows = stateM.rows;
-  if (f.LOJA) rows = rows.filter(r => r[COL.LOJA] === f.LOJA);
-  if (f.MES) rows = rows.filter(r => r[COL.MES] === f.MES);
-
-  const names = uniqueSorted(rows, COL.NOME);
-  const datalist = document.getElementById('mColabOptions');
-  datalist.innerHTML = '';
-  names.forEach(n => {
-    const opt = document.createElement('option');
-    opt.value = n;
-    datalist.appendChild(opt);
-  });
-
-  // Se o colaborador selecionado não pertence mais ao recorte de filtros, limpa a seleção
-  if (stateM.selectedNome && !names.includes(stateM.selectedNome)) {
-    clearColaborador();
-  }
+function variacao(current, previous) {
+  const nCur = parseDecimalHours(current);
+  const nPrev = parseDecimalHours(previous);
+  if (Number.isNaN(nCur) || Number.isNaN(nPrev)) return { text: '—', cls: '' };
+  const diff = nCur - nPrev;
+  if (diff === 0) return { text: decimalHoursToHHMM(0), cls: '' };
+  return { text: decimalHoursToHHMM(diff), cls: diff > 0 ? 'positive' : 'negative' };
 }
 
-function clearColaborador() {
-  stateM.selectedNome = '';
-  document.getElementById('mColabInfoPanel').hidden = true;
-  document.getElementById('mTablePanel').hidden = true;
-  document.getElementById('mEmptyState').hidden = false;
-  document.getElementById('mEmptyState').querySelector('p').textContent =
-    'Selecione um colaborador para ver o banco de horas mensal.';
-}
-
-function selectColaborador(nome) {
-  let rows = stateM.rows.filter(r => r[COL.NOME] === nome);
-  const f = stateM.filters;
-  if (f.LOJA) rows = rows.filter(r => r[COL.LOJA] === f.LOJA);
-  if (f.MES) rows = rows.filter(r => r[COL.MES] === f.MES);
-
-  if (!rows.length) { clearColaborador(); return; }
-
-  stateM.selectedNome = nome;
-  const first = rows[0];
-
-  document.getElementById('mInfoNome').textContent = first[COL.NOME] || '—';
-  document.getElementById('mInfoAdmissao').textContent = formatDate(first[COL.ADMISSAO]);
-  document.getElementById('mInfoFuncao').textContent = first[COL.FUNCAO] || '—';
-  document.getElementById('mInfoLoja').textContent = lojaLabel(first[COL.LOJA]);
-
+function buildColabEvolutionTable(rows) {
   const sorted = [...rows].sort((a, b) =>
     String(a[COL.MES]).localeCompare(String(b[COL.MES]), 'pt-BR', { numeric: true })
   );
-
-  const tbody = document.getElementById('mTableBody');
-  const frag = document.createDocumentFragment();
-  sorted.forEach(r => {
+  const trs = sorted.map((r, i) => {
     const n = parseDecimalHours(r[COL.BANCO]);
-    const cls = Number.isNaN(n) ? '' : (n < 0 ? 'negative' : (n > 0 ? 'positive' : ''));
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${mesLabel(r[COL.MES])}</td>
-      <td class="num"><span class="banco-value ${cls}">${decimalHoursToHHMM(r[COL.BANCO])}</span></td>
-    `;
-    frag.appendChild(tr);
-  });
-  tbody.innerHTML = '';
-  tbody.appendChild(frag);
+    const bancoCls = Number.isNaN(n) ? '' : (n < 0 ? 'negative' : (n > 0 ? 'positive' : ''));
+    const varInfo = i === 0 ? { text: '—', cls: '' } : variacao(r[COL.BANCO], sorted[i - 1][COL.BANCO]);
+    return `
+      <tr>
+        <td>${mesLabel(r[COL.MES])}</td>
+        <td class="num"><span class="banco-value ${bancoCls}">${decimalHoursToHHMM(r[COL.BANCO])}</span></td>
+        <td class="num"><span class="banco-value ${varInfo.cls}">${varInfo.text}</span></td>
+      </tr>`;
+  }).join('');
 
-  document.getElementById('mRowCount').textContent = `${sorted.length} mês(es) encontrados`;
-  document.getElementById('mColabInfoPanel').hidden = false;
-  document.getElementById('mTablePanel').hidden = false;
-  document.getElementById('mEmptyState').hidden = true;
+  return `
+    <table>
+      <thead>
+        <tr>
+          <th>Mês</th>
+          <th class="num">Banco de horas</th>
+          <th class="num">Variação</th>
+        </tr>
+      </thead>
+      <tbody>${trs}</tbody>
+    </table>`;
+}
+
+function buildColabNode(nome, rows) {
+  const first = rows[0];
+  const funcao = first[COL.FUNCAO] || '—';
+  return `
+    <details class="mensal-colab">
+      <summary>
+        <span class="mensal-colab-name">${nome}</span>
+        <span class="mensal-colab-meta">${funcao} · ${rows.length} mês(es) <span class="chevron">▸</span></span>
+      </summary>
+      <div class="mensal-colab-table-wrap">${buildColabEvolutionTable(rows)}</div>
+    </details>`;
+}
+
+function buildLojaNode(loja, rows) {
+  const colabNames = uniqueSorted(rows, COL.NOME);
+  const colabNodes = colabNames.map(nome =>
+    buildColabNode(nome, rows.filter(r => r[COL.NOME] === nome))
+  ).join('');
+
+  return `
+    <details class="mensal-store">
+      <summary>
+        <span>${lojaLabel(loja)}</span>
+        <span class="mensal-store-meta">${colabNames.length} colaborador(es) <span class="chevron">▸</span></span>
+      </summary>
+      <div class="mensal-colab-list">${colabNodes}</div>
+    </details>`;
+}
+
+function renderMensalTree() {
+  const treePanel = document.getElementById('mTreePanel');
+  const tree = document.getElementById('mTree');
+  const emptyState = document.getElementById('mEmptyState');
+
+  if (!stateM.supervisor) {
+    treePanel.hidden = true;
+    emptyState.hidden = false;
+    emptyState.querySelector('p').textContent = 'Selecione um supervisor para ver as lojas e colaboradores.';
+    tree.innerHTML = '';
+    return;
+  }
+
+  const rows = stateM.rows.filter(r => r[COL.SUPER] === stateM.supervisor);
+  if (!rows.length) {
+    treePanel.hidden = true;
+    emptyState.hidden = false;
+    emptyState.querySelector('p').textContent = 'Nenhum dado encontrado para este supervisor.';
+    tree.innerHTML = '';
+    return;
+  }
+
+  const lojas = uniqueSorted(rows, COL.LOJA);
+  tree.innerHTML = lojas.map(loja => buildLojaNode(loja, rows.filter(r => r[COL.LOJA] === loja))).join('');
+
+  const totalColab = uniqueSorted(rows, COL.NOME).length;
+  document.getElementById('mTreeSummary').textContent =
+    `${lojas.length} loja(s) · ${totalColab} colaborador(es)`;
+
+  treePanel.hidden = false;
+  emptyState.hidden = true;
 }
 
 function setupMensalFilters() {
-  document.getElementById('mLoja').addEventListener('change', e => {
-    stateM.filters.LOJA = e.target.value;
-    refreshColabOptions();
-  });
-  document.getElementById('mMes').addEventListener('change', e => {
-    stateM.filters.MES = e.target.value;
-    refreshColabOptions();
-  });
-  document.getElementById('mColabSearch').addEventListener('input', e => {
-    const val = e.target.value;
-    const match = stateM.rows.find(r => r[COL.NOME] === val);
-    if (match) selectColaborador(val);
-    else clearColaborador();
+  document.getElementById('mSupervisor').addEventListener('change', e => {
+    stateM.supervisor = e.target.value;
+    renderMensalTree();
   });
 }
 
@@ -301,11 +320,11 @@ async function initMensal() {
     const text = await res.text();
     stateM.rows = csvToObjects(text);
 
-    populateSelect(document.getElementById('mLoja'), uniqueSorted(stateM.rows, COL.LOJA), lojaLabel);
-    populateSelect(document.getElementById('mMes'), uniqueSorted(stateM.rows, COL.MES), mesLabel);
-    refreshColabOptions();
+    populateSelect(document.getElementById('mSupervisor'), uniqueSorted(stateM.rows, COL.SUPER));
+    renderMensalTree();
   } catch (err) {
     console.error(err);
+    document.getElementById('mTreePanel').hidden = true;
     document.getElementById('mEmptyState').hidden = false;
     document.getElementById('mEmptyState').querySelector('p').textContent = 'Erro ao carregar dados da planilha GERAL';
   }

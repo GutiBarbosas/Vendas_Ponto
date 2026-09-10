@@ -168,77 +168,31 @@
 
     <section class="page" id="pageMensal" hidden>
 
-      <section class="panel filters-panel" aria-label="Filtros do acompanhamento mensal">
+      <section class="panel filters-panel" aria-label="Filtro do acompanhamento mensal">
         <div class="filters-head">
           <h2>Filtros</h2>
         </div>
         <div class="filters-grid">
           <div class="field">
-            <label for="mLoja">Loja</label>
-            <select id="mLoja"><option value="">Todas</option></select>
-          </div>
-          <div class="field">
-            <label for="mMes">Mês</label>
-            <select id="mMes"><option value="">Todos</option></select>
-          </div>
-          <div class="field field-search">
-            <label for="mColabSearch">Colaborador</label>
-            <div class="search-input">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/><path d="M21 21l-4.3-4.3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-              <input type="text" id="mColabSearch" list="mColabOptions" placeholder="Digite o nome do colaborador…" autocomplete="off">
-            </div>
-            <datalist id="mColabOptions"></datalist>
+            <label for="mSupervisor">Supervisor</label>
+            <select id="mSupervisor"><option value="">Selecione um supervisor…</option></select>
           </div>
         </div>
       </section>
 
-      <section class="panel" id="mColabInfoPanel" aria-label="Dados do colaborador" hidden>
-        <div class="filters-head">
-          <h2>Colaborador</h2>
-        </div>
-        <div class="colab-info-grid">
-          <div class="info-field">
-            <span class="info-label">Nome</span>
-            <span class="info-value" id="mInfoNome">—</span>
-          </div>
-          <div class="info-field">
-            <span class="info-label">Admissão</span>
-            <span class="info-value" id="mInfoAdmissao">—</span>
-          </div>
-          <div class="info-field">
-            <span class="info-label">Função</span>
-            <span class="info-value" id="mInfoFuncao">—</span>
-          </div>
-          <div class="info-field">
-            <span class="info-label">Loja</span>
-            <span class="info-value" id="mInfoLoja">—</span>
-          </div>
-        </div>
-      </section>
-
-      <section class="panel table-panel" id="mTablePanel" aria-label="Banco de horas por mês" hidden>
+      <section class="panel" id="mTreePanel" aria-label="Lojas e colaboradores do supervisor" hidden>
         <div class="table-head">
           <div>
-            <h2>Banco de Horas por Mês</h2>
-            <p class="table-sub" id="mRowCount">—</p>
+            <h2>Lojas e Colaboradores</h2>
+            <p class="table-sub" id="mTreeSummary">—</p>
           </div>
         </div>
-        <div class="table-scroll">
-          <table id="mTable">
-            <thead>
-              <tr>
-                <th>Mês</th>
-                <th class="num">Banco de horas</th>
-              </tr>
-            </thead>
-            <tbody id="mTableBody"></tbody>
-          </table>
-        </div>
+        <div class="mensal-tree" id="mTree"></div>
       </section>
 
       <div class="empty-state" id="mEmptyState">
         <svg width="34" height="34" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M21 21l-4.3-4.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-        <p>Selecione um colaborador para ver o banco de horas mensal.</p>
+        <p>Selecione um supervisor para ver as lojas e colaboradores.</p>
       </div>
 
     </section>
