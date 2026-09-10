@@ -652,19 +652,15 @@ tbody td.col-data { font-family: var(--mono); font-size: 12.3px; color: var(--te
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-sm);
   background: var(--bg-elevated);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
 .loja-resumo-empty {
   margin: 0;
   font-size: 12px;
   color: var(--text-faint);
-}
-
-.loja-resumo-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
-  gap: 20px;
-  align-items: center;
 }
 
 .loja-resumo-chart-wrap {
@@ -676,7 +672,7 @@ tbody td.col-data { font-family: var(--mono); font-size: 12.3px; color: var(--te
 
 .loja-resumo-svg {
   width: 100%;
-  height: 100px;
+  height: 92px;
   display: block;
 }
 
@@ -709,50 +705,37 @@ tbody td.col-data { font-family: var(--mono); font-size: 12.3px; color: var(--te
   margin: 8px 0 0;
 }
 
-.loja-resumo-stats {
-  display: flex;
-  flex-direction: column;
+.loja-resumo-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 12px;
-  min-width: 0;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border-soft);
 }
 
-.trend-value {
-  font-size: 14px;
+.situacao-value {
+  font-size: 13.5px;
   font-weight: 700;
-}
-.trend-value.trend-up { color: var(--green); }
-.trend-value.trend-down { color: var(--red); }
-.trend-value.trend-stable { color: var(--text-dim); }
-
-.colab-summary-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 2px;
-}
-
-.colab-summary-empty {
-  font-size: 12px;
-  color: var(--text-faint);
-  margin: 2px 0 0;
-}
-
-.colab-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 600;
   white-space: nowrap;
 }
-.colab-tag.up { background: var(--green-soft); color: var(--green); }
-.colab-tag.down { background: var(--red-soft); color: var(--red); }
-.colab-tag.flat { background: var(--border-soft); color: var(--text-dim); }
+.situacao-value.positiva { color: var(--green); }
+.situacao-value.negativa { color: var(--red); }
+.situacao-value.estavel { color: var(--amber); }
+
+.loja-resumo-colabs-line {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  padding-top: 10px;
+  border-top: 1px dashed var(--border-soft);
+}
+
+.colab-count.up { color: var(--green); }
+.colab-count.down { color: var(--red); }
+.colab-count.flat { color: var(--text-dim); }
 
 @media (max-width: 680px) {
-  .loja-resumo-grid { grid-template-columns: 1fr; }
+  .loja-resumo-kpis { grid-template-columns: repeat(2, 1fr); }
 }
 
 @media (max-width: 860px) {

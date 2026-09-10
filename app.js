@@ -262,24 +262,30 @@ function buildLojaMonthlySeries(rows) {
     if (Number.isNaN(val)) return;
     if (!byMes.has(mes)) byMes.set(mes, { sum: 0, count: 0 });
     const acc = byMes.get(mes);
-    acc.sum += val;
+    acc.sum += val; // soma em horas decimais — o carry para HH:MM só acontece na formatação final
     acc.count += 1;
   });
   return [...byMes.entries()]
-    .map(([mes, acc]) => ({ mes, avg: acc.sum / acc.count }))
+    .map(([mes, acc]) => ({ mes, avg: acc.sum / acc.count, sum: acc.sum, count: acc.count }))
     .sort((a, b) => mesOrderIndex(a.mes) - mesOrderIndex(b.mes));
 }
 
-function buildLojaTrend(series) {
-  const atual = series[series.length - 1];
-  const anterior = series.length > 1 ? series[series.length - 2] : null;
-  let trend = { arrow: '→', label: 'Estável', cls: 'stable' };
-  if (anterior) {
-    const diffMin = Math.round((atual.avg - anterior.avg) * 60);
-    if (diffMin > 0) trend = { arrow: '↑', label: 'Aumento', cls: 'up' };
-    else if (diffMin < 0) trend = { arrow: '↓', label: 'Redução', cls: 'down' };
+/* Situação da loja + variação da média, com base na comparação mês atual x mês anterior. */
+function buildLojaSituacao(atual, anterior) {
+  if (!anterior) {
+    return {
+      emoji: '🟡', label: 'Estável', cls: 'estavel',
+      varText: '—', varCls: ''
+    };
   }
-  return { atual, anterior, trend };
+  const diff = atual.avg - anterior.avg;
+  const diffMin = Math.round(diff * 60);
+  const varText = decimalHoursToHHMM(diff);
+  const varCls = diffMin > 0 ? 'positive' : (diffMin < 0 ? 'negative' : '');
+
+  if (diffMin > 0) return { emoji: '🟢', label: 'Evolução positiva', cls: 'positiva', varText, varCls };
+  if (diffMin < 0) return { emoji: '🔴', label: 'Evolução negativa', cls: 'negativa', varText, varCls };
+  return { emoji: '🟡', label: 'Estável', cls: 'estavel', varText, varCls };
 }
 
 function buildLojaColabComparison(rows, atualMes, anteriorMes) {
@@ -347,41 +353,48 @@ function buildLojaSummaryPanel(rows) {
     return `<div class="mensal-loja-resumo"><p class="loja-resumo-empty">Sem dados de banco de horas para exibir o resumo da loja.</p></div>`;
   }
 
-  const { atual, anterior, trend } = buildLojaTrend(series);
+  const atual = series[series.length - 1];
+  const anterior = series.length > 1 ? series[series.length - 2] : null;
+  const situacao = buildLojaSituacao(atual, anterior);
   const comparison = buildLojaColabComparison(rows, atual.mes, anterior ? anterior.mes : null);
-  const mediaCls = atual.avg > 0 ? 'positive' : (atual.avg < 0 ? 'negative' : '');
 
-  const comparisonHtml = comparison
-    ? `
-      <div class="colab-summary-tags">
-        <span class="colab-tag up">▲ ${comparison.up} com aumento</span>
-        <span class="colab-tag down">▼ ${comparison.down} com redução</span>
-        <span class="colab-tag flat">— ${comparison.flat} sem alteração</span>
-      </div>`
-    : `<p class="colab-summary-empty">Sem mês anterior para comparar.</p>`;
+  const mediaCls = atual.avg > 0 ? 'positive' : (atual.avg < 0 ? 'negative' : '');
+  const saldoCls = atual.sum > 0 ? 'positive' : (atual.sum < 0 ? 'negative' : '');
+  const totalColabs = uniqueSorted(rows, COL.NOME).length;
+
+  const colabsLine = comparison
+    ? `🟢 <span class="colab-count up">${comparison.up}</span> com aumento · 🔴 <span class="colab-count down">${comparison.down}</span> com redução · ⚪ <span class="colab-count flat">${comparison.flat}</span> sem alteração`
+    : 'Sem mês anterior para comparar colaboradores.';
 
   return `
     <div class="mensal-loja-resumo">
-      <div class="loja-resumo-grid">
-        <div class="loja-resumo-chart-wrap">
-          <span class="info-label">Evolução mensal · banco de horas</span>
-          ${buildLojaSparkline(series)}
+      <div class="loja-resumo-chart-wrap">
+        <span class="info-label">Evolução mensal · banco de horas</span>
+        ${buildLojaSparkline(series)}
+      </div>
+      <div class="loja-resumo-kpis">
+        <div class="info-field">
+          <span class="info-label">Situação da loja</span>
+          <span class="info-value situacao-value ${situacao.cls}">${situacao.emoji} ${situacao.label}</span>
         </div>
-        <div class="loja-resumo-stats">
-          <div class="info-field">
-            <span class="info-label">Média da loja · ${atual.mes}</span>
-            <span class="info-value banco-value ${mediaCls}">${decimalHoursToHHMM(atual.avg)}</span>
-          </div>
-          <div class="info-field">
-            <span class="info-label">Tendência vs. mês anterior</span>
-            <span class="info-value trend-value trend-${trend.cls}">${trend.arrow} ${trend.label}</span>
-          </div>
-          <div class="info-field">
-            <span class="info-label">Colaboradores</span>
-            ${comparisonHtml}
-          </div>
+        <div class="info-field">
+          <span class="info-label">Média atual · ${atual.mes}</span>
+          <span class="info-value banco-value ${mediaCls}">${decimalHoursToHHMM(atual.avg)}</span>
+        </div>
+        <div class="info-field">
+          <span class="info-label">Variação vs. mês anterior</span>
+          <span class="info-value banco-value ${situacao.varCls}">${situacao.varText}</span>
+        </div>
+        <div class="info-field">
+          <span class="info-label">Saldo total · ${atual.mes}</span>
+          <span class="info-value banco-value ${saldoCls}">${decimalHoursToHHMM(atual.sum)}</span>
+        </div>
+        <div class="info-field">
+          <span class="info-label">Colaboradores</span>
+          <span class="info-value">${totalColabs}</span>
         </div>
       </div>
+      <div class="loja-resumo-colabs-line">${colabsLine}</div>
     </div>`;
 }
 
