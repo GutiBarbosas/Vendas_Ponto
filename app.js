@@ -1,9 +1,22 @@
 /* ==========================================================================
-   Dashboard de Registro e Venda — leitura direta de BASE.csv (mesma pasta)
-   Sem frameworks, sem build tools. Para atualizar os dados, basta substituir
-   o arquivo BASE.csv por uma nova exportação da planilha, mantendo as
-   colunas: NOME,LOJA,DT,DIA,STATUS_RH,VENDA,GERENTE,SUPER
+   Dashboard de Registro e Venda — leitura direta do Google Sheets publicado
+   (CSV). Sem frameworks, sem build tools. Os dados são buscados nas URLs
+   abaixo a cada carregamento da página; para atualizar, basta editar a
+   planilha de origem — nenhuma alteração de código é necessária.
+   Colunas esperadas (aba BASE/VENDA): NOME,LOJA,DT,DIA,STATUS_RH,VENDA,GERENTE,SUPER
+   Colunas esperadas (aba GERAL/COMPARATIVO): NOME,ADMISSÃO,FUNÇÃO,LOJA,BANCO,MÊS
    ========================================================================== */
+
+const SHEET_URLS = {
+  GERAL: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSxpLcHLU6BqeDr874WX-uiPBOIVnT6RmIjVr4QrMNXkDYmBjIKpNS2YzKeSaCUffyJV-V9DogWwVQD/pub?gid=0&single=true&output=csv',
+  BASE: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSxpLcHLU6BqeDr874WX-uiPBOIVnT6RmIjVr4QrMNXkDYmBjIKpNS2YzKeSaCUffyJV-V9DogWwVQD/pub?gid=2119380496&single=true&output=csv'
+};
+
+/* Adiciona um parâmetro de cache-busting para evitar que o navegador ou o
+   Google Sheets sirvam uma versão antiga do CSV publicado. */
+function sheetUrl(base) {
+  return base + '&t=' + Date.now();
+}
 
 const DIA_LABELS = {
   SEG: 'Segunda-feira', TER: 'Terça-feira', QUA: 'Quarta-feira',
@@ -283,8 +296,8 @@ function setupMensalFilters() {
 async function initMensal() {
   setupMensalFilters();
   try {
-    const res = await fetch('GERAL.csv', { cache: 'no-store' });
-    if (!res.ok) throw new Error('Falha ao carregar GERAL.csv');
+    const res = await fetch(sheetUrl(SHEET_URLS.GERAL), { cache: 'no-store' });
+    if (!res.ok) throw new Error('Falha ao carregar planilha GERAL');
     const text = await res.text();
     stateM.rows = csvToObjects(text);
 
@@ -294,7 +307,7 @@ async function initMensal() {
   } catch (err) {
     console.error(err);
     document.getElementById('mEmptyState').hidden = false;
-    document.getElementById('mEmptyState').querySelector('p').textContent = 'Erro ao carregar dados/GERAL.csv';
+    document.getElementById('mEmptyState').querySelector('p').textContent = 'Erro ao carregar dados da planilha GERAL';
   }
 }
 
@@ -473,8 +486,8 @@ async function init() {
   const loadedChip = document.getElementById('loadedChip');
 
   try {
-    const res = await fetch('BASE.csv', { cache: 'no-store' });
-    if (!res.ok) throw new Error('Falha ao carregar BASE.csv');
+    const res = await fetch(sheetUrl(SHEET_URLS.BASE), { cache: 'no-store' });
+    if (!res.ok) throw new Error('Falha ao carregar planilha BASE');
     const text = await res.text();
     state.rows = csvToObjects(text);
     state.filtered = [...state.rows];
@@ -489,7 +502,7 @@ async function init() {
   } catch (err) {
     console.error(err);
     loadedChip.classList.add('stale');
-    loadedText.textContent = 'Erro ao carregar data/BASE.csv';
+    loadedText.textContent = 'Erro ao carregar dados da planilha BASE';
     document.getElementById('rowCount').textContent = 'Não foi possível carregar os dados.';
   }
 }
