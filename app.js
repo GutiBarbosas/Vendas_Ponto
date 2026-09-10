@@ -251,6 +251,140 @@ function buildColabEvolutionTable(rows) {
     </table>`;
 }
 
+/* ---- Painel de resumo visual da loja (exibido apenas quando expandida) ---- */
+
+function buildLojaMonthlySeries(rows) {
+  const byMes = new Map();
+  rows.forEach(r => {
+    const mes = String(r[COL.MES] || '').trim().toUpperCase();
+    if (mesOrderIndex(mes) === MES_ORDER.length) return; // mês não reconhecido, ignora
+    const val = parseDecimalHours(r[COL.BANCO]);
+    if (Number.isNaN(val)) return;
+    if (!byMes.has(mes)) byMes.set(mes, { sum: 0, count: 0 });
+    const acc = byMes.get(mes);
+    acc.sum += val;
+    acc.count += 1;
+  });
+  return [...byMes.entries()]
+    .map(([mes, acc]) => ({ mes, avg: acc.sum / acc.count }))
+    .sort((a, b) => mesOrderIndex(a.mes) - mesOrderIndex(b.mes));
+}
+
+function buildLojaTrend(series) {
+  const atual = series[series.length - 1];
+  const anterior = series.length > 1 ? series[series.length - 2] : null;
+  let trend = { arrow: '→', label: 'Estável', cls: 'stable' };
+  if (anterior) {
+    const diffMin = Math.round((atual.avg - anterior.avg) * 60);
+    if (diffMin > 0) trend = { arrow: '↑', label: 'Aumento', cls: 'up' };
+    else if (diffMin < 0) trend = { arrow: '↓', label: 'Redução', cls: 'down' };
+  }
+  return { atual, anterior, trend };
+}
+
+function buildLojaColabComparison(rows, atualMes, anteriorMes) {
+  if (!anteriorMes) return null;
+  const nomes = uniqueSorted(rows, COL.NOME);
+  let up = 0, down = 0, flat = 0;
+  nomes.forEach(nome => {
+    const colabRows = rows.filter(r => r[COL.NOME] === nome);
+    const rAtual = colabRows.find(r => String(r[COL.MES]).trim().toUpperCase() === atualMes);
+    const rAnterior = colabRows.find(r => String(r[COL.MES]).trim().toUpperCase() === anteriorMes);
+    if (!rAtual || !rAnterior) return; // sem os dois meses para comparar
+    const vAtual = parseDecimalHours(rAtual[COL.BANCO]);
+    const vAnterior = parseDecimalHours(rAnterior[COL.BANCO]);
+    if (Number.isNaN(vAtual) || Number.isNaN(vAnterior)) return;
+    const diffMin = Math.round((vAtual - vAnterior) * 60);
+    if (diffMin > 0) up++;
+    else if (diffMin < 0) down++;
+    else flat++;
+  });
+  return { up, down, flat };
+}
+
+function buildLojaSparkline(series) {
+  if (series.length < 2) {
+    return `<p class="loja-resumo-chart-empty">Dados insuficientes para exibir a evolução mensal.</p>`;
+  }
+  const w = 480, h = 108, padX = 24, padY = 18;
+  const values = series.map(s => s.avg);
+  let min = Math.min(...values, 0);
+  let max = Math.max(...values, 0);
+  if (min === max) { min -= 1; max += 1; }
+  const spanX = w - 2 * padX;
+  const spanY = h - 2 * padY;
+  const xAt = i => padX + (i / (series.length - 1)) * spanX;
+  const yAt = v => padY + spanY - ((v - min) / (max - min)) * spanY;
+
+  const pts = series.map((s, i) => `${xAt(i).toFixed(1)},${yAt(s.avg).toFixed(1)}`).join(' ');
+
+  const zeroLine = (min < 0 && max > 0)
+    ? `<line x1="${padX}" y1="${yAt(0).toFixed(1)}" x2="${w - padX}" y2="${yAt(0).toFixed(1)}" class="spark-zero"/>`
+    : '';
+
+  const dots = series.map((s, i) => {
+    const x = xAt(i), y = yAt(s.avg);
+    const cls = s.avg > 0 ? 'positive' : (s.avg < 0 ? 'negative' : '');
+    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" class="spark-dot ${cls}"><title>${s.mes}: ${decimalHoursToHHMM(s.avg)}</title></circle>`;
+  }).join('');
+
+  const labels = series.map((s, i) =>
+    `<text x="${xAt(i).toFixed(1)}" y="${h - 4}" class="spark-label" text-anchor="middle">${s.mes}</text>`
+  ).join('');
+
+  return `
+    <svg viewBox="0 0 ${w} ${h}" class="loja-resumo-svg" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Evolução mensal do banco de horas da loja">
+      ${zeroLine}
+      <polyline points="${pts}" class="spark-line" fill="none"/>
+      ${dots}
+      ${labels}
+    </svg>`;
+}
+
+function buildLojaSummaryPanel(rows) {
+  const series = buildLojaMonthlySeries(rows);
+  if (!series.length) {
+    return `<div class="mensal-loja-resumo"><p class="loja-resumo-empty">Sem dados de banco de horas para exibir o resumo da loja.</p></div>`;
+  }
+
+  const { atual, anterior, trend } = buildLojaTrend(series);
+  const comparison = buildLojaColabComparison(rows, atual.mes, anterior ? anterior.mes : null);
+  const mediaCls = atual.avg > 0 ? 'positive' : (atual.avg < 0 ? 'negative' : '');
+
+  const comparisonHtml = comparison
+    ? `
+      <div class="colab-summary-tags">
+        <span class="colab-tag up">▲ ${comparison.up} com aumento</span>
+        <span class="colab-tag down">▼ ${comparison.down} com redução</span>
+        <span class="colab-tag flat">— ${comparison.flat} sem alteração</span>
+      </div>`
+    : `<p class="colab-summary-empty">Sem mês anterior para comparar.</p>`;
+
+  return `
+    <div class="mensal-loja-resumo">
+      <div class="loja-resumo-grid">
+        <div class="loja-resumo-chart-wrap">
+          <span class="info-label">Evolução mensal · banco de horas</span>
+          ${buildLojaSparkline(series)}
+        </div>
+        <div class="loja-resumo-stats">
+          <div class="info-field">
+            <span class="info-label">Média da loja · ${atual.mes}</span>
+            <span class="info-value banco-value ${mediaCls}">${decimalHoursToHHMM(atual.avg)}</span>
+          </div>
+          <div class="info-field">
+            <span class="info-label">Tendência vs. mês anterior</span>
+            <span class="info-value trend-value trend-${trend.cls}">${trend.arrow} ${trend.label}</span>
+          </div>
+          <div class="info-field">
+            <span class="info-label">Colaboradores</span>
+            ${comparisonHtml}
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
 function buildColabNode(nome, rows) {
   const first = rows[0];
   const funcao = first[COL.FUNCAO] || '—';
@@ -276,6 +410,7 @@ function buildLojaNode(loja, rows) {
         <span>${lojaLabel(loja)}</span>
         <span class="mensal-store-meta">${colabNames.length} colaborador(es) <span class="chevron">▸</span></span>
       </summary>
+      ${buildLojaSummaryPanel(rows)}
       <div class="mensal-colab-list">${colabNodes}</div>
     </details>`;
 }
