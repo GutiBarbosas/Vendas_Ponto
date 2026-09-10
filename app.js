@@ -31,6 +31,15 @@ const MES_LABELS = {
   '09': 'Setembro', '10': 'Outubro', '11': 'Novembro', '12': 'Dezembro'
 };
 
+/* Ordem cronológica dos meses (a planilha traz abreviações em português,
+   ex: JAN, FEV, MAR... que não podem ser ordenadas alfabeticamente). */
+const MES_ORDER = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
+
+function mesOrderIndex(m) {
+  const idx = MES_ORDER.indexOf(String(m || '').trim().toUpperCase());
+  return idx === -1 ? MES_ORDER.length : idx;
+}
+
 const COL = { NOME: 'NOME', ADMISSAO: 'ADMISSÃO', FUNCAO: 'FUNÇÃO', LOJA: 'LOJA', BANCO: 'BANCO', MES: 'MÊS', GERENTE: 'GERENTE', SUPER: 'SUPERVISOR' };
 
 const stateM = {
@@ -216,9 +225,7 @@ function variacao(current, previous) {
 }
 
 function buildColabEvolutionTable(rows) {
-  const sorted = [...rows].sort((a, b) =>
-    String(a[COL.MES]).localeCompare(String(b[COL.MES]), 'pt-BR', { numeric: true })
-  );
+  const sorted = [...rows].sort((a, b) => mesOrderIndex(a[COL.MES]) - mesOrderIndex(b[COL.MES]));
   const trs = sorted.map((r, i) => {
     const n = parseDecimalHours(r[COL.BANCO]);
     const bancoCls = Number.isNaN(n) ? '' : (n < 0 ? 'negative' : (n > 0 ? 'positive' : ''));
