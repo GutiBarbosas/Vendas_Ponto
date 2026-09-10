@@ -35,7 +35,8 @@ const COL = { NOME: 'NOME', ADMISSAO: 'ADMISSÃO', FUNCAO: 'FUNÇÃO', LOJA: 'LO
 
 const stateM = {
   rows: [],
-  supervisor: ''
+  supervisor: '',
+  gerente: ''
 };
 
 const state = {
@@ -277,19 +278,22 @@ function renderMensalTree() {
   const tree = document.getElementById('mTree');
   const emptyState = document.getElementById('mEmptyState');
 
-  if (!stateM.supervisor) {
+  if (!stateM.supervisor && !stateM.gerente) {
     treePanel.hidden = true;
     emptyState.hidden = false;
-    emptyState.querySelector('p').textContent = 'Selecione um supervisor para ver as lojas e colaboradores.';
+    emptyState.querySelector('p').textContent = 'Selecione um supervisor e/ou um gerente para ver as lojas e colaboradores.';
     tree.innerHTML = '';
     return;
   }
 
-  const rows = stateM.rows.filter(r => r[COL.SUPER] === stateM.supervisor);
+  const rows = stateM.rows.filter(r =>
+    (!stateM.supervisor || r[COL.SUPER] === stateM.supervisor) &&
+    (!stateM.gerente || r[COL.GERENTE] === stateM.gerente)
+  );
   if (!rows.length) {
     treePanel.hidden = true;
     emptyState.hidden = false;
-    emptyState.querySelector('p').textContent = 'Nenhum dado encontrado para este supervisor.';
+    emptyState.querySelector('p').textContent = 'Nenhum dado encontrado para os filtros selecionados.';
     tree.innerHTML = '';
     return;
   }
@@ -310,6 +314,10 @@ function setupMensalFilters() {
     stateM.supervisor = e.target.value;
     renderMensalTree();
   });
+  document.getElementById('mGerente').addEventListener('change', e => {
+    stateM.gerente = e.target.value;
+    renderMensalTree();
+  });
 }
 
 async function initMensal() {
@@ -321,6 +329,7 @@ async function initMensal() {
     stateM.rows = csvToObjects(text);
 
     populateSelect(document.getElementById('mSupervisor'), uniqueSorted(stateM.rows, COL.SUPER));
+    populateSelect(document.getElementById('mGerente'), uniqueSorted(stateM.rows, COL.GERENTE));
     renderMensalTree();
   } catch (err) {
     console.error(err);

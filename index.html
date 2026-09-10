@@ -168,7 +168,7 @@
 
     <section class="page" id="pageMensal" hidden>
 
-      <section class="panel filters-panel" aria-label="Filtro do acompanhamento mensal">
+      <section class="panel filters-panel" aria-label="Filtros do acompanhamento mensal">
         <div class="filters-head">
           <h2>Filtros</h2>
         </div>
@@ -177,10 +177,14 @@
             <label for="mSupervisor">Supervisor</label>
             <select id="mSupervisor"><option value="">Selecione um supervisor…</option></select>
           </div>
+          <div class="field">
+            <label for="mGerente">Gerente</label>
+            <select id="mGerente"><option value="">Selecione um gerente…</option></select>
+          </div>
         </div>
       </section>
 
-      <section class="panel" id="mTreePanel" aria-label="Lojas e colaboradores do supervisor" hidden>
+      <section class="panel" id="mTreePanel" aria-label="Lojas e colaboradores" hidden>
         <div class="table-head">
           <div>
             <h2>Lojas e Colaboradores</h2>
@@ -192,7 +196,7 @@
 
       <div class="empty-state" id="mEmptyState">
         <svg width="34" height="34" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M21 21l-4.3-4.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-        <p>Selecione um supervisor para ver as lojas e colaboradores.</p>
+        <p>Selecione um supervisor e/ou um gerente para ver as lojas e colaboradores.</p>
       </div>
 
     </section>
