@@ -745,3 +745,46 @@ tbody td.col-data { font-family: var(--mono); font-size: 12.3px; color: var(--te
 @media (max-width: 620px) {
   .colab-info-grid { grid-template-columns: 1fr 1fr; }
 }
+
+/* ---- Exportar PDF (Acompanhamento Mensal) ---- */
+
+.print-header { display: none; }
+.print-hide { display: none !important; }
+
+@media print {
+  @page { margin: 14mm 12mm; }
+
+  :root {
+    --bg: #ffffff;
+    --bg-elevated: #f7f8fa;
+    --sidebar-bg: #ffffff;
+    --panel-bg: #ffffff;
+    --panel-bg-soft: #f7f8fa;
+    --border: #d0d5dd;
+    --border-soft: #e4e7ec;
+    --text: #101828;
+    --text-dim: #475467;
+    --text-faint: #667085;
+  }
+
+  body { font-size: 11px; background: #fff; }
+
+  /* Esconde tudo que não faz sentido no papel */
+  .sidebar, .sidebar-overlay, .topbar, .filters-panel,
+  .table-actions, .empty-state, .chevron { display: none !important; }
+  #pageRegistro { display: none !important; }
+
+  .app { display: block !important; }
+  .main { display: block !important; }
+  .content { padding: 0 !important; }
+
+  .panel { box-shadow: none !important; border: 1px solid var(--border) !important; border-radius: 6px !important; }
+
+  .print-header { display: block !important; margin-bottom: 14px; }
+  .print-header h1 { font-size: 16px; margin: 0 0 4px; }
+  .print-header p { font-size: 11px; margin: 2px 0; color: var(--text-dim); }
+  .print-header .print-header-date { color: var(--text-faint); }
+
+  /* Evita cortar uma loja ou colaborador no meio, entre páginas */
+  .mensal-store, .mensal-colab { break-inside: avoid; page-break-inside: avoid; }
+}

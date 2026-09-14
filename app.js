@@ -475,8 +475,76 @@ function setupMensalFilters() {
   });
 }
 
+/* ---- Exportar PDF (Acompanhamento Mensal) ----
+   Usa a impressão do navegador ("Salvar como PDF"): não exige bibliotecas externas.
+   Regra: se nenhuma loja estiver expandida, exporta TODAS as lojas do filtro atual
+   (relatório por supervisor/gerente). Se uma ou mais lojas já estiverem expandidas,
+   exporta somente essas (relatório por loja). */
+function setupMensalExport() {
+  document.getElementById('exportMensalPdf').addEventListener('click', exportMensalPDF);
+}
+
+function exportMensalPDF() {
+  const tree = document.getElementById('mTree');
+  const allStores = [...tree.querySelectorAll(':scope > details.mensal-store')];
+  if (!allStores.length) return;
+
+  const openStores = allStores.filter(d => d.open);
+  const storesToExport = openStores.length ? openStores : allStores;
+
+  // Guarda o estado atual (aberto/fechado) de lojas e colaboradores para restaurar após a impressão
+  const snapshot = allStores.map(d => ({
+    el: d,
+    open: d.open,
+    colabs: [...d.querySelectorAll('details.mensal-colab')].map(c => ({ el: c, open: c.open }))
+  }));
+
+  // Expande as lojas/colaboradores que entrarão no PDF e esconde as demais
+  allStores.forEach(d => {
+    const include = storesToExport.includes(d);
+    d.classList.toggle('print-hide', !include);
+    if (include) {
+      d.open = true;
+      d.querySelectorAll('details.mensal-colab').forEach(c => { c.open = true; });
+    }
+  });
+
+  updateMensalPrintHeader(storesToExport.length === allStores.length ? 'supervisor' : 'loja', storesToExport.length);
+
+  const restore = () => {
+    snapshot.forEach(({ el, open, colabs }) => {
+      el.classList.remove('print-hide');
+      el.open = open;
+      colabs.forEach(({ el: c, open: co }) => { c.open = co; });
+    });
+    window.removeEventListener('afterprint', restore);
+  };
+  window.addEventListener('afterprint', restore);
+
+  window.print();
+}
+
+function updateMensalPrintHeader(modo, totalLojas) {
+  const header = document.getElementById('mPrintHeader');
+  const supervisorText = stateM.supervisor || 'Todos';
+  const gerenteText = stateM.gerente || 'Todos';
+  const agora = new Date();
+  const dataStr = agora.toLocaleDateString('pt-BR');
+  const horaStr = agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  const escopo = modo === 'loja'
+    ? `${totalLojas} loja(s) selecionada(s)`
+    : 'Todas as lojas do filtro';
+
+  header.innerHTML = `
+    <h1>Acompanhamento Mensal · Banco de Horas</h1>
+    <p><strong>Supervisor:</strong> ${supervisorText} &nbsp;·&nbsp; <strong>Gerente:</strong> ${gerenteText} &nbsp;·&nbsp; ${escopo}</p>
+    <p class="print-header-date">Gerado em ${dataStr} às ${horaStr}</p>
+  `;
+}
+
 async function initMensal() {
   setupMensalFilters();
+  setupMensalExport();
   try {
     const res = await fetch(sheetUrl(SHEET_URLS.GERAL), { cache: 'no-store' });
     if (!res.ok) throw new Error('Falha ao carregar planilha GERAL');
