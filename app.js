@@ -45,8 +45,30 @@ const COL = { NOME: 'NOME', ADMISSAO: 'ADMISSÃO', FUNCAO: 'FUNÇÃO', LOJA: 'LO
 const stateM = {
   rows: [],
   supervisor: '',
-  gerente: ''
+  gerente: '',
+  loja: '',
+  colab: '',
+  periodo: 'mensal',   // 'mensal' | 'trimestral' | 'semestral' (por enquanto só guarda a seleção)
+  mesPeriodo: ''       // '' = todos; ex.: 'JAN', 'T1', 'S2' (por enquanto só guarda a seleção)
 };
+
+/* Definição dos períodos do filtro (usada apenas para montar as opções do seletor
+   "Mês/Período"; os cálculos trimestrais/semestrais ainda não foram implementados). */
+const MES_FULL = {
+  JAN: 'Janeiro', FEV: 'Fevereiro', MAR: 'Março', ABR: 'Abril',
+  MAI: 'Maio', JUN: 'Junho', JUL: 'Julho', AGO: 'Agosto',
+  SET: 'Setembro', OUT: 'Outubro', NOV: 'Novembro', DEZ: 'Dezembro'
+};
+const TRIMESTRES = [
+  { key: 'T1', label: '1º Trimestre', meses: ['JAN', 'FEV', 'MAR'] },
+  { key: 'T2', label: '2º Trimestre', meses: ['ABR', 'MAI', 'JUN'] },
+  { key: 'T3', label: '3º Trimestre', meses: ['JUL', 'AGO', 'SET'] },
+  { key: 'T4', label: '4º Trimestre', meses: ['OUT', 'NOV', 'DEZ'] }
+];
+const SEMESTRES = [
+  { key: 'S1', label: '1º Semestre', meses: ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN'] },
+  { key: 'S2', label: '2º Semestre', meses: ['JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'] }
+];
 
 const state = {
   rows: [],
@@ -411,9 +433,10 @@ function buildColabNode(nome, rows) {
     </details>`;
 }
 
-function buildLojaNode(loja, rows) {
+function buildLojaNode(loja, rows, colabFilter) {
   const colabNames = uniqueSorted(rows, COL.NOME);
-  const colabNodes = colabNames.map(nome =>
+  const shownNames = colabFilter ? colabNames.filter(n => n === colabFilter) : colabNames;
+  const colabNodes = shownNames.map(nome =>
     buildColabNode(nome, rows.filter(r => r[COL.NOME] === nome))
   ).join('');
 
@@ -433,7 +456,7 @@ function renderMensalTree() {
   const tree = document.getElementById('mTree');
   const emptyState = document.getElementById('mEmptyState');
 
-  if (!stateM.supervisor && !stateM.gerente) {
+  if (!stateM.supervisor && !stateM.gerente && !stateM.loja && !stateM.colab) {
     treePanel.hidden = true;
     emptyState.hidden = false;
     emptyState.querySelector('p').textContent = 'Selecione um supervisor e/ou um gerente para ver as lojas e colaboradores.';
@@ -443,7 +466,9 @@ function renderMensalTree() {
 
   const rows = stateM.rows.filter(r =>
     (!stateM.supervisor || r[COL.SUPER] === stateM.supervisor) &&
-    (!stateM.gerente || r[COL.GERENTE] === stateM.gerente)
+    (!stateM.gerente || r[COL.GERENTE] === stateM.gerente) &&
+    (!stateM.loja || r[COL.LOJA] === stateM.loja) &&
+    (!stateM.colab || r[COL.NOME] === stateM.colab)
   );
   if (!rows.length) {
     treePanel.hidden = true;
@@ -454,7 +479,18 @@ function renderMensalTree() {
   }
 
   const lojas = uniqueSorted(rows, COL.LOJA);
-  tree.innerHTML = lojas.map(loja => buildLojaNode(loja, rows.filter(r => r[COL.LOJA] === loja))).join('');
+  // Linhas completas de cada loja (respeitando supervisor/gerente/loja, mas NÃO o filtro de colaborador),
+  // para que o resumo e o gráfico da loja continuem calculados com todos os colaboradores dela.
+  const rowsLojaBase = stateM.rows.filter(r =>
+    (!stateM.supervisor || r[COL.SUPER] === stateM.supervisor) &&
+    (!stateM.gerente || r[COL.GERENTE] === stateM.gerente)
+  );
+  tree.innerHTML = lojas.map(loja =>
+    buildLojaNode(loja, rowsLojaBase.filter(r => r[COL.LOJA] === loja), stateM.colab)
+  ).join('');
+
+  // Com um colaborador selecionado, já abre a loja e o colaborador para facilitar a leitura
+  if (stateM.colab) tree.querySelectorAll('details').forEach(d => { d.open = true; });
 
   const totalColab = uniqueSorted(rows, COL.NOME).length;
   document.getElementById('mTreeSummary').textContent =
@@ -464,14 +500,85 @@ function renderMensalTree() {
   emptyState.hidden = true;
 }
 
+/* ---- Filtros encadeados: Supervisor/Gerente → Loja → Colaborador ---- */
+
+function mensalRowsFor(upTo) {
+  // Linhas que satisfazem os filtros "acima" do nível pedido ('loja' ou 'colab')
+  return stateM.rows.filter(r =>
+    (!stateM.supervisor || r[COL.SUPER] === stateM.supervisor) &&
+    (!stateM.gerente || r[COL.GERENTE] === stateM.gerente) &&
+    (upTo !== 'colab' || !stateM.loja || r[COL.LOJA] === stateM.loja)
+  );
+}
+
+function refreshMensalColabOptions() {
+  const el = document.getElementById('mColab');
+  populateSelect(el, uniqueSorted(mensalRowsFor('colab'), COL.NOME));
+  stateM.colab = el.value; // volta para "Todos" se o colaborador não pertence mais ao recorte
+}
+
+function refreshMensalLojaOptions() {
+  const el = document.getElementById('mLoja');
+  populateSelect(el, uniqueSorted(mensalRowsFor('loja'), COL.LOJA), lojaLabel);
+  stateM.loja = el.value; // volta para "Todas" se a loja não pertence mais ao recorte
+  refreshMensalColabOptions();
+}
+
+/* ---- Período (Mensal / Trimestral / Semestral) → opções de "Mês/Período" ----
+   Por enquanto os seletores apenas guardam a escolha em stateM; ainda não alteram
+   a tabela, o gráfico nem os cálculos. */
+function refreshMensalPeriodOptions() {
+  const el = document.getElementById('mMesPeriodo');
+  const mesesNaBase = new Set(stateM.rows.map(r => String(r[COL.MES] || '').trim().toUpperCase()));
+  let opts = [];
+  if (stateM.periodo === 'trimestral' || stateM.periodo === 'semestral') {
+    const defs = stateM.periodo === 'trimestral' ? TRIMESTRES : SEMESTRES;
+    opts = defs
+      .filter(p => p.meses.some(m => mesesNaBase.has(m)))
+      .map(p => ({ value: p.key, label: `${p.label} (${p.meses[0]}–${p.meses[p.meses.length - 1]})` }));
+  } else {
+    opts = MES_ORDER
+      .filter(m => mesesNaBase.has(m))
+      .map(m => ({ value: m, label: MES_FULL[m] || m }));
+  }
+  const placeholder = el.querySelector('option[value=""]');
+  el.innerHTML = '';
+  el.appendChild(placeholder);
+  opts.forEach(o => {
+    const opt = document.createElement('option');
+    opt.value = o.value;
+    opt.textContent = o.label;
+    el.appendChild(opt);
+  });
+  stateM.mesPeriodo = '';
+}
+
 function setupMensalFilters() {
   document.getElementById('mSupervisor').addEventListener('change', e => {
     stateM.supervisor = e.target.value;
+    refreshMensalLojaOptions();
     renderMensalTree();
   });
   document.getElementById('mGerente').addEventListener('change', e => {
     stateM.gerente = e.target.value;
+    refreshMensalLojaOptions();
     renderMensalTree();
+  });
+  document.getElementById('mLoja').addEventListener('change', e => {
+    stateM.loja = e.target.value;
+    refreshMensalColabOptions();
+    renderMensalTree();
+  });
+  document.getElementById('mColab').addEventListener('change', e => {
+    stateM.colab = e.target.value;
+    renderMensalTree();
+  });
+  document.getElementById('mPeriodo').addEventListener('change', e => {
+    stateM.periodo = e.target.value;
+    refreshMensalPeriodOptions();
+  });
+  document.getElementById('mMesPeriodo').addEventListener('change', e => {
+    stateM.mesPeriodo = e.target.value;
   });
 }
 
@@ -553,6 +660,8 @@ async function initMensal() {
 
     populateSelect(document.getElementById('mSupervisor'), uniqueSorted(stateM.rows, COL.SUPER));
     populateSelect(document.getElementById('mGerente'), uniqueSorted(stateM.rows, COL.GERENTE));
+    refreshMensalLojaOptions();
+    refreshMensalPeriodOptions();
     renderMensalTree();
   } catch (err) {
     console.error(err);
