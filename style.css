@@ -549,6 +549,7 @@ tbody td.col-data { font-family: var(--mono); font-size: 12.3px; color: var(--te
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.info-value.wrap { white-space: normal; overflow: visible; text-overflow: clip; }
 
 .banco-value { font-family: var(--mono); font-weight: 600; font-size: 12.6px; color: var(--text); }
 .banco-value.negative { color: var(--red); }

@@ -48,12 +48,12 @@ const stateM = {
   gerente: '',
   loja: '',
   colab: '',
-  periodo: 'mensal',   // 'mensal' | 'trimestral' | 'semestral' (por enquanto só guarda a seleção)
-  mesPeriodo: ''       // '' = todos; ex.: 'JAN', 'T1', 'S2' (por enquanto só guarda a seleção)
+  periodo: 'mensal',   // 'mensal' | 'trimestral' | 'semestral'
+  mesPeriodo: ''       // '' = todos (comportamento anterior); ex.: 'JAN', 'T1', 'S2'
 };
 
-/* Definição dos períodos do filtro (usada apenas para montar as opções do seletor
-   "Mês/Período"; os cálculos trimestrais/semestrais ainda não foram implementados). */
+/* Definição dos períodos do filtro (opções do seletor "Mês/Período" e base dos
+   cálculos de Trimestral/Semestral — ver resolveMensalPeriodo). */
 const MES_FULL = {
   JAN: 'Janeiro', FEV: 'Fevereiro', MAR: 'Março', ABR: 'Abril',
   MAI: 'Maio', JUN: 'Junho', JUL: 'Julho', AGO: 'Agosto',
@@ -370,6 +370,8 @@ function buildLojaSparkline(series) {
 }
 
 function buildLojaSummaryPanel(rows) {
+  const periodo = resolveMensalPeriodo();
+  if (periodo) return buildLojaSummaryPanelPeriodo(rows, periodo);
   const series = buildLojaMonthlySeries(rows);
   if (!series.length) {
     return `<div class="mensal-loja-resumo"><p class="loja-resumo-empty">Sem dados de banco de horas para exibir o resumo da loja.</p></div>`;
@@ -420,7 +422,248 @@ function buildLojaSummaryPanel(rows) {
     </div>`;
 }
 
+/* ==========================================================================
+   Períodos reais (Mensal / Trimestral / Semestral) — banco de horas
+   Regras:
+   - BANCO é o saldo do mês: NUNCA se somam saldos mensais para formar trimestre/semestre.
+     Variação = saldo final − saldo inicial (primeiro/último mês que REALMENTE têm registro).
+   - Registros são agrupados por NOME + LOJA + MÊS e mantidos como LISTA. Mais de um registro
+     no mesmo mês é CONFLITO: nenhum é escolhido, nenhum é somado, nenhum é "corrigido".
+   - Sem período específico selecionado (Mês/Período = "Todos"), nada abaixo é usado.
+   ========================================================================== */
+
+function mesNorm(m) {
+  return String(m || '').trim().toUpperCase();
+}
+
+/* Meses que existem hoje na base inteira (define o "período disponível"). */
+function mesesNaBaseSet() {
+  return new Set(stateM.rows.map(r => mesNorm(r[COL.MES])));
+}
+
+/* Retorna null (comportamento anterior) ou { modo, key, label, meses, mes }.
+   Para trimestral/semestral, `meses` = somente os meses do período que existem na base. */
+function resolveMensalPeriodo() {
+  const sel = stateM.mesPeriodo;
+  if (!sel) return null;
+  if (stateM.periodo === 'mensal') {
+    return MES_ORDER.includes(sel) ? { modo: 'mensal', key: sel, label: MES_FULL[sel] || sel, mes: sel } : null;
+  }
+  const defs = stateM.periodo === 'trimestral' ? TRIMESTRES : SEMESTRES;
+  const def = defs.find(d => d.key === sel);
+  if (!def) return null;
+  const naBase = mesesNaBaseSet();
+  const meses = def.meses.filter(m => naBase.has(m));
+  return meses.length ? { modo: stateM.periodo, key: def.key, label: def.label, meses } : null;
+}
+
+/* Agrupa registros por MÊS mantendo TODOS em lista (nunca sobrescreve, nunca escolhe um). */
+function groupRowsByMes(rows) {
+  const g = new Map();
+  rows.forEach(r => {
+    const m = mesNorm(r[COL.MES]);
+    if (!g.has(m)) g.set(m, []);
+    g.get(m).push(r);
+  });
+  return g;
+}
+
+function formatBancoLista(recs) {
+  return recs.map(r => decimalHoursToHHMM(r[COL.BANCO])).join(' / ');
+}
+
+function bancoListaCls(recs) {
+  if (recs.length !== 1) return '';
+  const n = parseDecimalHours(recs[0][COL.BANCO]);
+  if (Number.isNaN(n)) return '';
+  return n < 0 ? 'negative' : (n > 0 ? 'positive' : '');
+}
+
+function periodoBadge(texto, cls) {
+  return `<span class="badge ${cls}">${texto}</span>`;
+}
+
+function periodoField(label, valueHtml) {
+  return `
+        <div class="info-field">
+          <span class="info-label">${label}</span>
+          ${valueHtml}
+        </div>`;
+}
+
+/* Cálculo do colaborador (rows = registros do colaborador NESSA loja, todos os meses). */
+function computeColabPeriodo(rows, periodo) {
+  const porMes = groupRowsByMes(rows);
+
+  if (periodo.modo === 'mensal') {
+    const recs = porMes.get(periodo.mes) || [];
+    return { modo: 'mensal', mes: periodo.mes, recs, conflito: recs.length > 1 };
+  }
+
+  const mesesComReg = periodo.meses.filter(m => (porMes.get(m) || []).length > 0);
+  if (!mesesComReg.length) return { modo: periodo.modo, vazio: true, mesesComReg };
+
+  const mesIni = mesesComReg[0];
+  const mesFim = mesesComReg[mesesComReg.length - 1];
+  const recIni = porMes.get(mesIni);
+  const recFim = porMes.get(mesFim);
+  const mesesDup = [];
+  if (recIni.length > 1) mesesDup.push(mesIni);
+  if (recFim.length > 1 && mesFim !== mesIni) mesesDup.push(mesFim);
+  const conflito = mesesDup.length > 0;
+  const parcial = mesesComReg.length < periodo.meses.length || mesesComReg.length < 2;
+
+  let varInfo = { text: '—', cls: '' };
+  if (!conflito && mesIni !== mesFim) varInfo = variacao(recFim[0][COL.BANCO], recIni[0][COL.BANCO]);
+
+  return {
+    modo: periodo.modo, mesIni, mesFim, recIni, recFim, mesesComReg, mesesDup,
+    conflito, status: conflito ? 'Conflito' : (parcial ? 'Parcial' : 'Normal'), varInfo
+  };
+}
+
+function buildColabNodePeriodo(nome, rows, periodo) {
+  const first = rows[0];
+  const funcao = first[COL.FUNCAO] || '—';
+  const c = computeColabPeriodo(rows, periodo);
+  let badges = '';
+  let body = '';
+
+  if (c.modo === 'mensal') {
+    if (c.conflito) {
+      badges = periodoBadge('Conflito', 'badge-noregistro') + ' ' + periodoBadge(`${c.mes} duplicado`, 'badge-noregistro');
+    }
+    body = `
+      <div class="loja-resumo-kpis">
+        ${periodoField(`Banco de horas · ${c.mes}`, `<span class="info-value banco-value wrap ${bancoListaCls(c.recs)}">${c.recs.length ? formatBancoLista(c.recs) : '—'}</span>`)}
+        ${periodoField('Variação', `<span class="info-value banco-value">—</span>`)}
+        ${periodoField('Situação', `<span class="info-value wrap">${c.conflito ? badges : '—'}</span>`)}
+      </div>`;
+  } else if (c.vazio) {
+    badges = periodoBadge('Sem registros', 'badge-neutral');
+    body = `
+      <div class="loja-resumo-kpis">
+        ${periodoField('Saldo inicial', `<span class="info-value banco-value">—</span>`)}
+        ${periodoField('Saldo final', `<span class="info-value banco-value">—</span>`)}
+        ${periodoField('Variação', `<span class="info-value banco-value">—</span>`)}
+        ${periodoField('Status', `<span class="info-value wrap">${badges}</span>`)}
+        ${periodoField('Meses', `<span class="info-value wrap">—</span>`)}
+      </div>`;
+  } else {
+    const statusCls = c.status === 'Conflito' ? 'badge-noregistro' : (c.status === 'Parcial' ? 'badge-neutral' : 'badge-registro');
+    badges = periodoBadge(c.status, statusCls);
+    if (c.conflito) badges += ' ' + c.mesesDup.map(m => periodoBadge(`${m} duplicado`, 'badge-noregistro')).join(' ');
+    body = `
+      <div class="loja-resumo-kpis">
+        ${periodoField(`Saldo inicial · ${c.mesIni}`, `<span class="info-value banco-value wrap ${bancoListaCls(c.recIni)}">${formatBancoLista(c.recIni)}</span>`)}
+        ${periodoField(`Saldo final · ${c.mesFim}`, `<span class="info-value banco-value wrap ${bancoListaCls(c.recFim)}">${formatBancoLista(c.recFim)}</span>`)}
+        ${periodoField('Variação', `<span class="info-value banco-value ${c.varInfo.cls}">${c.varInfo.text}</span>`)}
+        ${periodoField('Status', `<span class="info-value wrap">${badges}</span>`)}
+        ${periodoField('Meses', `<span class="info-value wrap">${c.mesesComReg.join(', ')}</span>`)}
+      </div>`;
+  }
+
+  return `
+    <details class="mensal-colab">
+      <summary>
+        <span class="mensal-colab-name">${nome}</span>
+        <span class="mensal-colab-meta">${funcao}${c.modo === 'mensal' ? '' : ' · ' + periodo.label} <span class="chevron">▸</span></span>
+      </summary>
+      <div class="mensal-colab-table-wrap">${body}</div>
+    </details>`;
+}
+
+/* Saldo da loja em UM mês = soma dos saldos dos colaboradores nesse mês.
+   Se algum colaborador tiver mais de um registro no mês, o saldo é INDETERMINADO (nunca soma duplicados). */
+function lojaSaldoMes(porMes, mes) {
+  const recs = porMes.get(mes) || [];
+  if (!recs.length) return { vazio: true };
+  const contagem = new Map();
+  recs.forEach(r => contagem.set(r[COL.NOME], (contagem.get(r[COL.NOME]) || 0) + 1));
+  if ([...contagem.values()].some(n => n > 1)) return { indeterminado: true, mes };
+  let sum = 0, count = 0;
+  recs.forEach(r => {
+    const v = parseDecimalHours(r[COL.BANCO]);
+    if (Number.isNaN(v)) return;
+    sum += v;
+    count += 1;
+  });
+  return { sum, count, mes };
+}
+
+function lojaSaldoHtml(s) {
+  if (s.vazio) return `<span class="info-value banco-value">—</span>`;
+  if (s.indeterminado) return `<span class="info-value banco-value wrap">Indeterminado — ${s.mes} duplicado</span>`;
+  const cls = s.sum > 0 ? 'positive' : (s.sum < 0 ? 'negative' : '');
+  return `<span class="info-value banco-value ${cls}">${decimalHoursToHHMM(s.sum)}</span>`;
+}
+
+function buildLojaSummaryPanelPeriodo(rows, periodo) {
+  const series = buildLojaMonthlySeries(rows); // gráfico existente: preservado como está
+  if (!series.length) {
+    return `<div class="mensal-loja-resumo"><p class="loja-resumo-empty">Sem dados de banco de horas para exibir o resumo da loja.</p></div>`;
+  }
+  const porMes = groupRowsByMes(rows);
+  const totalColabs = uniqueSorted(rows, COL.NOME).length;
+  const colabsField = periodoField('Colaboradores', `<span class="info-value">${totalColabs}</span>`);
+  let kpis = '';
+
+  if (periodo.modo === 'mensal') {
+    const s = lojaSaldoMes(porMes, periodo.mes);
+    let mediaHtml;
+    if (s.vazio || (!s.indeterminado && !s.count)) mediaHtml = `<span class="info-value banco-value">—</span>`;
+    else if (s.indeterminado) mediaHtml = lojaSaldoHtml(s);
+    else {
+      const avg = s.sum / s.count;
+      mediaHtml = `<span class="info-value banco-value ${avg > 0 ? 'positive' : (avg < 0 ? 'negative' : '')}">${decimalHoursToHHMM(avg)}</span>`;
+    }
+    kpis = `
+        ${periodoField('Situação da loja', `<span class="info-value">—</span>`)}
+        ${periodoField(`Média atual · ${periodo.mes}`, mediaHtml)}
+        ${periodoField('Variação', `<span class="info-value banco-value">—</span>`)}
+        ${periodoField(`Saldo total · ${periodo.mes}`, lojaSaldoHtml(s))}
+        ${colabsField}`;
+  } else {
+    const mesesComReg = periodo.meses.filter(m => (porMes.get(m) || []).length > 0);
+    if (!mesesComReg.length) {
+      kpis = `
+        ${periodoField('Saldo inicial', `<span class="info-value banco-value">—</span>`)}
+        ${periodoField('Saldo final', `<span class="info-value banco-value">—</span>`)}
+        ${periodoField('Variação', `<span class="info-value banco-value">—</span>`)}
+        ${colabsField}`;
+    } else {
+      const mesIni = mesesComReg[0];
+      const mesFim = mesesComReg[mesesComReg.length - 1];
+      const ini = lojaSaldoMes(porMes, mesIni);
+      const fim = lojaSaldoMes(porMes, mesFim);
+      let varHtml = `<span class="info-value banco-value">—</span>`;
+      if (mesIni !== mesFim && !ini.indeterminado && !fim.indeterminado) {
+        const diff = fim.sum - ini.sum;
+        const diffMin = Math.round(diff * 60);
+        varHtml = `<span class="info-value banco-value ${diffMin > 0 ? 'positive' : (diffMin < 0 ? 'negative' : '')}">${decimalHoursToHHMM(diff)}</span>`;
+      }
+      kpis = `
+        ${periodoField(`Saldo inicial · ${mesIni}`, lojaSaldoHtml(ini))}
+        ${periodoField(`Saldo final · ${mesFim}`, lojaSaldoHtml(fim))}
+        ${periodoField('Variação', varHtml)}
+        ${colabsField}`;
+    }
+  }
+
+  return `
+    <div class="mensal-loja-resumo">
+      <div class="loja-resumo-chart-wrap">
+        <span class="info-label">Evolução mensal · banco de horas</span>
+        ${buildLojaSparkline(series)}
+      </div>
+      <div class="loja-resumo-kpis">${kpis}
+      </div>
+    </div>`;
+}
+
 function buildColabNode(nome, rows) {
+  const periodo = resolveMensalPeriodo();
+  if (periodo) return buildColabNodePeriodo(nome, rows, periodo);
   const first = rows[0];
   const funcao = first[COL.FUNCAO] || '—';
   return `
@@ -525,8 +768,7 @@ function refreshMensalLojaOptions() {
 }
 
 /* ---- Período (Mensal / Trimestral / Semestral) → opções de "Mês/Período" ----
-   Por enquanto os seletores apenas guardam a escolha em stateM; ainda não alteram
-   a tabela, o gráfico nem os cálculos. */
+   A escolha fica em stateM e é consumida por resolveMensalPeriodo(). */
 function refreshMensalPeriodOptions() {
   const el = document.getElementById('mMesPeriodo');
   const mesesNaBase = new Set(stateM.rows.map(r => String(r[COL.MES] || '').trim().toUpperCase()));
@@ -576,9 +818,11 @@ function setupMensalFilters() {
   document.getElementById('mPeriodo').addEventListener('change', e => {
     stateM.periodo = e.target.value;
     refreshMensalPeriodOptions();
+    renderMensalTree();
   });
   document.getElementById('mMesPeriodo').addEventListener('change', e => {
     stateM.mesPeriodo = e.target.value;
+    renderMensalTree();
   });
 }
 
