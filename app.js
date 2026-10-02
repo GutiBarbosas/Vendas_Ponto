@@ -893,9 +893,245 @@ function updateMensalPrintHeader(modo, totalLojas) {
   `;
 }
 
+/* ==========================================================================
+   Exportar Consolidado (#mensal) — XLSX
+   - NÃO tem lógica própria de saldo/variação/status: usa resolveMensalPeriodo() e
+     computeColabPeriodo() (a mesma da tela). Aqui só se monta a linha de exportação.
+   - Nenhum registro duplicado é escolhido, somado ou corrigido: conflito = "Indeterminado".
+   - Contador e arquivo vêm da MESMA lista (buildConsolidadoLinhas).
+   ========================================================================== */
+
+const CONSOLIDADO_HEADERS = [
+  'Colaborador', 'Função', 'Loja', 'Supervisor', 'Gerente',
+  'Saldo inicial', 'Saldo final', 'Variação', 'Status', 'Meses considerados', 'Observação'
+];
+
+/* Linhas da base respeitando os filtros de #mensal; todos os filtros de hierarquia são opcionais. */
+function getMensalRowsFiltrados() {
+  return stateM.rows.filter(r =>
+    (!stateM.supervisor || r[COL.SUPER] === stateM.supervisor) &&
+    (!stateM.gerente || r[COL.GERENTE] === stateM.gerente) &&
+    (!stateM.loja || r[COL.LOJA] === stateM.loja) &&
+    (!stateM.colab || r[COL.NOME] === stateM.colab)
+  );
+}
+
+/* Valores distintos (na ordem em que aparecem) unidos por " / " — nunca escolhe só o primeiro. */
+function valoresDistintos(rows, key) {
+  const vistos = [];
+  rows.forEach(r => {
+    const v = String(r[key] == null ? '' : r[key]).trim();
+    if (v && !vistos.includes(v)) vistos.push(v);
+  });
+  return vistos.length ? vistos.join(' / ') : '—';
+}
+
+function saldoIndeterminado(mes) {
+  return `Indeterminado — ${mes} duplicado`;
+}
+
+/* Retorna { periodo, linhas } ; periodo = null quando não há mês/trimestre/semestre selecionado.
+   Cada item de `linhas` = { cols: [11 textos], saldoFinalNum } */
+function buildConsolidadoLinhas(criterio) {
+  const periodo = resolveMensalPeriodo();
+  if (!periodo) return { periodo: null, linhas: [] };
+
+  // Agrupa por NOME + LOJA mantendo TODOS os registros em lista (sem sobrescrever).
+  const grupos = new Map();
+  getMensalRowsFiltrados().forEach(r => {
+    const k = JSON.stringify([r[COL.NOME], r[COL.LOJA]]);
+    if (!grupos.has(k)) grupos.set(k, []);
+    grupos.get(k).push(r);
+  });
+
+  const linhas = [];
+  grupos.forEach(rows => {
+    const c = computeColabPeriodo(rows, periodo);
+    let ini, fim, varTxt, status, meses, obs, finalRecs;
+
+    if (c.modo === 'mensal') {
+      if (!c.recs.length) return;               // sem registro no período: não exporta
+      finalRecs = c.recs;
+      ini = '—';
+      fim = c.conflito ? saldoIndeterminado(c.mes) : formatBancoLista(c.recs);
+      varTxt = '—';
+      status = c.conflito ? 'Conflito' : '—';
+      meses = c.mes;
+      obs = c.conflito ? `${c.mes} duplicado` : '';
+    } else {
+      if (c.vazio) return;                      // sem registro no período: não exporta
+      finalRecs = c.recFim;
+      ini = c.recIni.length > 1 ? saldoIndeterminado(c.mesIni) : formatBancoLista(c.recIni);
+      fim = c.recFim.length > 1 ? saldoIndeterminado(c.mesFim) : formatBancoLista(c.recFim);
+      varTxt = c.varInfo.text;
+      status = c.status;
+      meses = c.mesesComReg.join(' / ');
+      obs = c.conflito ? c.mesesDup.map(m => `${m} duplicado`).join(' / ') : '';
+    }
+
+    // Saldo final numérico só existe quando há exatamente 1 registro e ele é legível.
+    const saldoFinalNum = finalRecs.length === 1 ? parseDecimalHours(finalRecs[0][COL.BANCO]) : NaN;
+    if (criterio === 'positivo' && !(saldoFinalNum > 0)) return;
+    if (criterio === 'negativo' && !(saldoFinalNum < 0)) return;
+
+    linhas.push({
+      cols: [
+        valoresDistintos(rows, COL.NOME),
+        valoresDistintos(rows, COL.FUNCAO),
+        lojaLabel(rows[0][COL.LOJA]),
+        valoresDistintos(rows, COL.SUPER),
+        valoresDistintos(rows, COL.GERENTE),
+        ini, fim, varTxt, status, meses, obs
+      ],
+      saldoFinalNum
+    });
+  });
+
+  // Ordem apenas de apresentação (loja, depois colaborador); não decide nenhum valor.
+  linhas.sort((x, y) =>
+    x.cols[2].localeCompare(y.cols[2], 'pt-BR', { numeric: true }) ||
+    x.cols[0].localeCompare(y.cols[0], 'pt-BR'));
+  return { periodo, linhas };
+}
+
+function nomeArquivoConsolidado(periodo) {
+  return `Banco_de_Horas_Consolidado_${periodo.key}.xlsx`;
+}
+
+/* ---- XLSX em JS puro: ZIP sem compressão + CRC32 próprio ---- */
+const CRC32_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+
+function crc32(bytes) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) c = CRC32_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+function zipStore(files) { // files: [{ name, data: Uint8Array }]
+  const enc = new TextEncoder();
+  const now = new Date();
+  const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1);
+  const dosDate = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+  const parts = [];
+  const central = [];
+  let offset = 0;
+  const u16 = (v, n) => { const b = new Uint8Array(2); new DataView(b.buffer).setUint16(0, v, true); return b; };
+  const u32 = v => { const b = new Uint8Array(4); new DataView(b.buffer).setUint32(0, v >>> 0, true); return b; };
+  const cat = arr => { const out = new Uint8Array(arr.reduce((s, x) => s + x.length, 0)); let o = 0; arr.forEach(x => { out.set(x, o); o += x.length; }); return out; };
+
+  files.forEach(f => {
+    const name = enc.encode(f.name);
+    const crc = crc32(f.data);
+    const local = cat([
+      u32(0x04034b50), u16(20), u16(0x0800), u16(0), u16(dosTime), u16(dosDate),
+      u32(crc), u32(f.data.length), u32(f.data.length), u16(name.length), u16(0), name, f.data
+    ]);
+    central.push(cat([
+      u32(0x02014b50), u16(20), u16(20), u16(0x0800), u16(0), u16(dosTime), u16(dosDate),
+      u32(crc), u32(f.data.length), u32(f.data.length), u16(name.length), u16(0), u16(0),
+      u16(0), u16(0), u32(0), u32(offset), name
+    ]));
+    parts.push(local);
+    offset += local.length;
+  });
+  const cd = cat(central);
+  const end = cat([
+    u32(0x06054b50), u16(0), u16(0), u16(files.length), u16(files.length),
+    u32(cd.length), u32(offset), u16(0)
+  ]);
+  return cat([...parts, cd, end]);
+}
+
+function xmlEscape(s) {
+  return String(s)
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function colLetter(i) { return String.fromCharCode(65 + i); } // 11 colunas: A..K
+
+/* matriz = [ [11 textos] (cabeçalho), [11 textos], ... ] → Uint8Array (.xlsx) */
+function buildXlsx(matriz) {
+  const enc = new TextEncoder();
+  const head = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
+  const rowsXml = matriz.map((linha, ri) =>
+    `<row r="${ri + 1}">` + linha.map((v, ci) =>
+      `<c r="${colLetter(ci)}${ri + 1}" t="inlineStr"><is><t xml:space="preserve">${xmlEscape(v)}</t></is></c>`
+    ).join('') + '</row>'
+  ).join('');
+  const widths = [28, 22, 11, 22, 22, 26, 30, 12, 11, 22, 24];
+  const colsXml = '<cols>' + widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('') + '</cols>';
+
+  const files = [
+    { name: '[Content_Types].xml', text: head + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>' },
+    { name: '_rels/.rels', text: head + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>' },
+    { name: 'xl/workbook.xml', text: head + '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Consolidado" sheetId="1" r:id="rId1"/></sheets></workbook>' },
+    { name: 'xl/_rels/workbook.xml.rels', text: head + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>' },
+    { name: 'xl/worksheets/sheet1.xml', text: head + `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${colsXml}<sheetData>${rowsXml}</sheetData></worksheet>` }
+  ].map(f => ({ name: f.name, data: enc.encode(f.text) }));
+  return zipStore(files);
+}
+
+function consolidadoCriterio() {
+  return document.getElementById('mConsCriterio').value;
+}
+
+/* Atualiza contador e botão. O contador = linhas.length da MESMA lista que será exportada. */
+function refreshConsolidado() {
+  const countEl = document.getElementById('mConsCount');
+  const hintEl = document.getElementById('mConsHint');
+  const btn = document.getElementById('mConsExport');
+  const { periodo, linhas } = buildConsolidadoLinhas(consolidadoCriterio());
+
+  if (!periodo) {
+    countEl.textContent = 'Colaboradores encontrados: —';
+    hintEl.textContent = 'Selecione um mês, trimestre ou semestre para exportar.';
+    btn.disabled = true;
+    return;
+  }
+  countEl.textContent = `Colaboradores encontrados: ${linhas.length}`;
+  hintEl.textContent = linhas.length ? '' : 'Nenhum colaborador encontrado para os filtros e o critério selecionados.';
+  btn.disabled = linhas.length === 0;
+}
+
+function exportConsolidado() {
+  const { periodo, linhas } = buildConsolidadoLinhas(consolidadoCriterio());
+  if (!periodo || !linhas.length) return;
+  const bytes = buildXlsx([CONSOLIDADO_HEADERS, ...linhas.map(l => l.cols)]);
+  const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = nomeArquivoConsolidado(periodo);
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+/* Ouvintes adicionais (registrados depois de setupMensalFilters, portanto rodam depois
+   dos handlers existentes e já enxergam o stateM atualizado). Não altera os handlers existentes. */
+function setupMensalConsolidado() {
+  ['mSupervisor', 'mGerente', 'mLoja', 'mColab', 'mPeriodo', 'mMesPeriodo', 'mConsCriterio'].forEach(id => {
+    document.getElementById(id).addEventListener('change', refreshConsolidado);
+  });
+  document.getElementById('mConsExport').addEventListener('click', exportConsolidado);
+  refreshConsolidado();
+}
+
 async function initMensal() {
   setupMensalFilters();
   setupMensalExport();
+  setupMensalConsolidado();
   try {
     const res = await fetch(sheetUrl(SHEET_URLS.GERAL), { cache: 'no-store' });
     if (!res.ok) throw new Error('Falha ao carregar planilha GERAL');
@@ -907,6 +1143,7 @@ async function initMensal() {
     refreshMensalLojaOptions();
     refreshMensalPeriodOptions();
     renderMensalTree();
+    refreshConsolidado();
   } catch (err) {
     console.error(err);
     document.getElementById('mTreePanel').hidden = true;

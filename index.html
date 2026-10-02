@@ -204,6 +204,30 @@
         </div>
       </section>
 
+      <section class="panel filters-panel" id="mConsolidadoPanel" aria-label="Exportar consolidado">
+        <div class="filters-head">
+          <h2>Exportar Consolidado</h2>
+        </div>
+        <div class="consolidado-row">
+          <div class="field">
+            <label for="mConsCriterio">Critério</label>
+            <select id="mConsCriterio">
+              <option value="positivo">Saldo positivo</option>
+              <option value="negativo">Saldo negativo</option>
+              <option value="todos">Todos</option>
+            </select>
+          </div>
+          <div class="consolidado-info">
+            <span class="consolidado-count" id="mConsCount">Colaboradores encontrados: —</span>
+            <span class="table-sub" id="mConsHint"></span>
+          </div>
+          <button class="btn-ghost" id="mConsExport" type="button" disabled>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            Exportar Consolidado
+          </button>
+        </div>
+      </section>
+
       <section class="panel" id="mTreePanel" aria-label="Lojas e colaboradores" hidden>
         <div class="table-head">
           <div>

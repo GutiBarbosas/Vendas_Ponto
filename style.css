@@ -285,6 +285,26 @@ a.nav-item { cursor: pointer; }
   color: var(--accent);
 }
 
+.btn-ghost:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-ghost:disabled:hover { border-color: var(--border); color: var(--text-dim); }
+
+/* Exportar Consolidado (#mensal) */
+.consolidado-row {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+.consolidado-row .field { min-width: 200px; }
+.consolidado-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.consolidado-count { font-size: 13px; font-weight: 600; color: var(--text); }
+
 .filters-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
