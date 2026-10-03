@@ -860,3 +860,44 @@ tbody td.col-data { font-family: var(--mono); font-size: 12.3px; color: var(--te
   .comp-cards { grid-template-columns: 1fr; }
 }
 #cEmptyState[hidden] { display: none; }
+
+/* ---- Comparativo Mensal: botões lado a lado e documento de impressão (PDF) ---- */
+#pageComparativo .table-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+#cPrintDoc { display: none; }
+
+@page comp {
+  size: A4 landscape;
+  margin: 12mm 10mm 14mm;
+  @bottom-right { content: "Página " counter(page) " de " counter(pages); font-size: 9px; color: #667085; }
+}
+
+@media print {
+  body.printing-comp #pageRegistro,
+  body.printing-comp #pageMensal,
+  body.printing-comp #pageComparativo > :not(#cPrintDoc) { display: none !important; }
+  body.printing-comp #pageComparativo { display: block !important; }
+  body.printing-comp #cPrintDoc { display: block; page: comp; color: #101828; }
+
+  #cPrintDoc * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .cp-head { padding-bottom: 10px; margin-bottom: 12px; border-bottom: 2px solid var(--accent); }
+  .cp-brand { font-size: 10px; font-weight: 600; letter-spacing: 0.04em; color: var(--text-faint); text-transform: uppercase; }
+  .cp-head h1 { margin: 2px 0 0; font-size: 20px; letter-spacing: 0.06em; }
+  .cp-sub { margin: 2px 0 10px; font-size: 14px; font-weight: 600; color: var(--accent); }
+  .cp-meta { display: flex; flex-wrap: wrap; gap: 6px 28px; margin: 0; }
+  .cp-meta div { display: flex; flex-direction: column; gap: 1px; }
+  .cp-meta dt { font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); }
+  .cp-meta dd { margin: 0; font-size: 12px; font-weight: 600; }
+  .cp-date { margin: 8px 0 0; font-size: 10px; color: var(--text-faint); }
+
+  .cp-section { margin-top: 14px; }
+  .cp-section h2 { margin: 0 0 2px; font-size: 13px; letter-spacing: 0.04em; break-after: avoid; page-break-after: avoid; }
+  .cp-section-meta { margin: 0 0 6px; font-size: 11px; color: var(--text-dim); break-after: avoid; page-break-after: avoid; }
+
+  .cp-table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
+  .cp-table thead { display: table-header-group; }
+  .cp-table thead th { position: static; background: var(--panel-bg-soft); color: var(--text-dim); padding: 6px 8px; border-bottom: 1.5px solid #101828; white-space: normal; }
+  .cp-table tbody td { padding: 5px 8px; white-space: normal; color: var(--text); border-bottom: 1px solid var(--border-soft); }
+  .cp-table tbody td.cp-nome { font-weight: 600; }
+  .cp-table tr { break-inside: avoid; page-break-inside: avoid; }
+  .cp-conf { color: var(--red); font-weight: 600; }
+}

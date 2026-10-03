@@ -1167,7 +1167,7 @@ async function initMensal() {
    - Colaborador sem registro em um dos meses = 0 nesse mês.
    ========================================================================== */
 
-const stateC = { mesAtual: '', mesAnt: '', supervisor: '', gerente: '', loja: '', colab: '', touched: false };
+const stateC = { mesAtual: '', mesAnt: '', supervisor: '', gerente: '', loja: '', colab: '', visao: 'todos', touched: false };
 const compLoad = { base: 'pendente', geral: 'pendente' }; // 'pendente' | 'ok' | 'erro'
 let compLast = null; // último resultado exibido (usado pela exportação)
 
@@ -1266,8 +1266,10 @@ function compBuildDados(recs) {
     [['A', stateC.mesAtual], ['P', stateC.mesAnt]].forEach(([per, key]) => {
       if (!key || !compRecInMonth(rec, key)) return;
       const k = JSON.stringify([compNormNome(rec.nome), rec.loja]);
-      if (!map.has(k)) map.set(k, { nome: rec.nome, loja: rec.loja, h: { A: [], P: [] }, v: { A: 0, P: 0 } });
+      if (!map.has(k)) map.set(k, { nome: rec.nome, loja: rec.loja, h: { A: [], P: [] }, v: { A: 0, P: 0 }, ger: new Set(), sup: new Set() });
       const e = map.get(k);
+      if (rec.ger) e.ger.add(rec.ger);
+      if (rec.sup) e.sup.add(rec.sup);
       if (rec.tipo === 'H') e.h[per].push(rec.val);
       else e.v[per] += rec.val;
     });
@@ -1276,7 +1278,7 @@ function compBuildDados(recs) {
   const rows = [...map.values()].map(e => {
     const confA = e.h.A.length > 1, confP = e.h.P.length > 1;
     return {
-      nome: e.nome, loja: e.loja, confA, confP,
+      nome: e.nome, loja: e.loja, confA, confP, ger: [...e.ger], sup: [...e.sup],
       hA: confA ? NaN : (e.h.A[0] || 0),
       hP: confP ? NaN : (e.h.P[0] || 0),
       vA: Math.round(e.v.A * 100) / 100,
@@ -1398,10 +1400,10 @@ function compRenderTable(d) {
   document.getElementById('cThHP').textContent = `Horas · ${mp}`;
   document.getElementById('cThVA').textContent = `Vendas · ${ma}`;
   document.getElementById('cThVP').textContent = `Vendas · ${mp}`;
-  document.getElementById('cRowCount').textContent = `${d.rows.length} colaborador(es) · ${mp} × ${ma}`;
+  document.getElementById('cRowCount').textContent = `${d.vis.length} colaborador(es) · ${mp} × ${ma}` + (stateC.visao === 'todos' ? '' : ` · ${compVisaoLabel(stateC.visao)}`);
 
   const dash = `<span class="banco-value">—</span>`;
-  document.getElementById('cTableBody').innerHTML = d.rows.map(r => {
+  document.getElementById('cTableBody').innerHTML = d.vis.map(r => {
     const conf = r.confA || r.confP;
     const dh = conf ? null : r.hA - r.hP;
     const ph = conf ? null : compPct(r.hA, r.hP);
@@ -1423,6 +1425,37 @@ function compRenderTable(d) {
   }).join('');
 }
 
+/* ---- Horas acumuladas em HH:MM (sem módulo de 24h) e visão Positivos/Negativos ---- */
+
+/* 55,23333 → "55:14"; -40,96667 → "-40:58"; withPlus adiciona "+" nos positivos (usado nas diferenças). */
+function compHHMM(n, withPlus) {
+  const m = Math.round(Math.abs(n) * 60);
+  if (m === 0) return '00:00';
+  const t = `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  return (n < 0 ? '-' : (withPlus ? '+' : '')) + t;
+}
+
+/* Diferença de horas em minutos (mesma regra do HH:MM exibido); null quando há Conflito. */
+function compDiffMin(r) {
+  return (r.confA || r.confP) ? null : Math.round((r.hA - r.hP) * 60);
+}
+
+/* 'positivos' → maior diferença primeiro; 'negativos' → mais negativos primeiro; 'todos' → ordem original. */
+function compVisaoRows(rows, visao) {
+  const byNome = (a, b) => String(a.nome).localeCompare(String(b.nome), 'pt-BR');
+  if (visao === 'positivos') {
+    return rows.filter(r => compDiffMin(r) > 0).sort((a, b) => compDiffMin(b) - compDiffMin(a) || byNome(a, b));
+  }
+  if (visao === 'negativos') {
+    return rows.filter(r => compDiffMin(r) < 0).sort((a, b) => compDiffMin(a) - compDiffMin(b) || byNome(a, b));
+  }
+  return rows;
+}
+
+function compVisaoLabel(visao) {
+  return visao === 'positivos' ? 'Positivos' : (visao === 'negativos' ? 'Negativos' : 'Todos');
+}
+
 function compShowEmpty(text) {
   document.getElementById('cContent').hidden = true;
   document.getElementById('cEmptyState').hidden = false;
@@ -1440,10 +1473,12 @@ function compRender() {
     compShowEmpty('Nenhum dado encontrado para os meses e filtros selecionados.');
     return;
   }
+  d.vis = compVisaoRows(d.rows, stateC.visao);
   compLast = d;
   compRenderCards(d);
   compRenderCharts(d);
   compRenderTable(d);
+  document.getElementById('cExport').disabled = document.getElementById('cPdf').disabled = !d.vis.length;
   document.getElementById('cEmptyState').hidden = true;
   document.getElementById('cContent').hidden = false;
 }
@@ -1486,37 +1521,138 @@ function compRefresh() {
 
 function compExport() {
   const d = compLast;
-  if (!d || !d.rows.length) return;
+  if (!d || !d.vis.length) return;
   const ma = mesLabel(d.atual), mp = mesLabel(d.ant);
   const dec = (n, dig) => n.toFixed(dig).replace('.', ',');
-  const horas = n => String(Number(n.toFixed(6))).replace('.', ',');
   const pct = p => p == null ? '—' : dec(p, 2);
+  /* Horas como TEXTO (="HH:MM"): o Excel não converte em horário nativo nem estraga valores negativos / acima de 24h. */
+  const horasTxt = n => `="${compHHMM(n, false)}"`;
+  const difTxt = n => `="${compHHMM(n, true)}"`;
   const headers = [
     'COLABORADOR', 'LOJA',
-    `HORAS ${ma} (h)`, `HORAS ${mp} (h)`, 'DIFERENÇA HORAS (h)', 'VARIAÇÃO HORAS (%)',
+    `HORAS ${ma}`, `HORAS ${mp}`, 'DIFERENÇA HORAS', 'VARIAÇÃO HORAS (%)',
     `VENDAS ${ma}`, `VENDAS ${mp}`, 'DIFERENÇA VENDAS', 'VARIAÇÃO VENDAS (%)'
   ];
   const lines = [headers.join(';')];
-  d.rows.forEach(r => {
+  d.vis.forEach(r => {
     const conf = r.confA || r.confP;
     lines.push([
       r.nome, lojaLabel(r.loja),
-      r.confA ? 'Conflito' : horas(r.hA),
-      r.confP ? 'Conflito' : horas(r.hP),
-      conf ? '—' : horas(r.hA - r.hP),
+      r.confA ? 'Conflito' : horasTxt(r.hA),
+      r.confP ? 'Conflito' : horasTxt(r.hP),
+      conf ? '—' : difTxt(r.hA - r.hP),
       conf ? '—' : pct(compPct(r.hA, r.hP)),
       dec(r.vA, 2), dec(r.vP, 2), dec(r.vA - r.vP, 2), pct(compPct(r.vA, r.vP))
     ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(';'));
   });
-  const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `comparativo_mensal_${d.atual}_vs_${d.ant}.csv`;
+  a.download = `comparativo_mensal_${d.atual}_vs_${d.ant}${stateC.visao === 'todos' ? '' : '_' + stateC.visao}.csv`;
   document.body.appendChild(a);
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+/* ---- Exportar PDF (impressão do navegador → "Salvar como PDF", mesmo método do Acompanhamento Mensal) ---- */
+
+function compUnion(rows, key) {
+  const out = [];
+  rows.forEach(r => (r[key] || []).forEach(v => { if (!out.includes(v)) out.push(v); }));
+  return out.length ? out.join(' / ') : '—';
+}
+
+function compPrintTable(rows, ma, mp) {
+  const trs = rows.map(r => {
+    const conf = r.confA || r.confP;
+    const dh = conf ? null : r.hA - r.hP;
+    const ph = conf ? null : compPct(r.hA, r.hP);
+    const hCell = (v, c) => c ? '<span class="cp-conf">Conflito</span>' : `<span class="banco-value ${compHorasCls(v)}">${compHHMM(v, false)}</span>`;
+    return `
+      <tr>
+        <td class="cp-nome">${escapeHtml(r.nome)}</td>
+        <td>${lojaLabel(r.loja)}</td>
+        <td>${escapeHtml(compUnion([r], 'ger'))}</td>
+        <td>${escapeHtml(compUnion([r], 'sup'))}</td>
+        <td class="num">${hCell(r.hA, r.confA)}</td>
+        <td class="num">${hCell(r.hP, r.confP)}</td>
+        <td class="num">${dh == null ? '—' : `<span class="banco-value ${compHorasCls(dh)}">${compHHMM(dh, true)}</span>`}</td>
+        <td class="num"><span class="banco-value ${dh == null || ph == null ? '' : compHorasCls(dh)}">${compPctText(ph)}</span></td>
+      </tr>`;
+  }).join('');
+  return `
+    <table class="cp-table">
+      <thead>
+        <tr>
+          <th>Colaborador</th><th>Loja</th><th>Gerente</th><th>Supervisor</th>
+          <th class="num">Horas · ${ma}</th><th class="num">Horas · ${mp}</th>
+          <th class="num">Diferença de horas</th><th class="num">Variação %</th>
+        </tr>
+      </thead>
+      <tbody>${trs}</tbody>
+    </table>`;
+}
+
+function compBuildPrintHtml(d) {
+  const ma = mesLabel(d.atual), mp = mesLabel(d.ant);
+  const agora = new Date();
+  const gerado = `${agora.toLocaleDateString('pt-BR')} às ${agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+  const meta = [
+    ['Período comparado', `${ma} × ${mp}`],
+    ['Supervisor', stateC.supervisor || 'Todos'],
+    ['Gerente', stateC.gerente || 'Todos'],
+    ['Loja', stateC.loja ? lojaLabel(stateC.loja) : 'Todas']
+  ];
+  if (stateC.colab) meta.push(['Colaborador', stateC.colab]);
+  if (stateC.visao !== 'todos') meta.push(['Visualização', compVisaoLabel(stateC.visao)]);
+
+  let body;
+  if (stateC.supervisor) {
+    // Um supervisor selecionado → uma seção por loja (Gerente e Supervisor identificados em cada uma)
+    const lojas = [...new Set(d.vis.map(r => r.loja))]
+      .sort((a, b) => String(a).localeCompare(String(b), 'pt-BR', { numeric: true }));
+    body = lojas.map(loja => {
+      const rows = d.vis.filter(r => r.loja === loja);
+      return `
+        <section class="cp-section">
+          <h2>${lojaLabel(loja).toUpperCase()}</h2>
+          <p class="cp-section-meta"><strong>Gerente:</strong> ${escapeHtml(compUnion(rows, 'ger'))} &nbsp;·&nbsp; <strong>Supervisor:</strong> ${escapeHtml(compUnion(rows, 'sup'))}</p>
+          ${compPrintTable(rows, ma, mp)}
+        </section>`;
+    }).join('');
+  } else {
+    body = `<section class="cp-section">${compPrintTable(d.vis, ma, mp)}</section>`;
+  }
+
+  return `
+    <header class="cp-head">
+      <span class="cp-brand">Registro &amp; Venda · Rede de Farmácias</span>
+      <h1>COMPARATIVO MENSAL</h1>
+      <p class="cp-sub">${ma} × ${mp}</p>
+      <dl class="cp-meta">${meta.map(([k, v]) => `<div><dt>${k}</dt><dd>${escapeHtml(v)}</dd></div>`).join('')}</dl>
+      <p class="cp-date">Gerado em ${gerado}</p>
+    </header>
+    ${body}`;
+}
+
+function compExportPdf() {
+  const d = compLast;
+  if (!d || !d.vis.length) return;
+  const doc = document.getElementById('cPrintDoc');
+  doc.innerHTML = compBuildPrintHtml(d);
+  document.body.classList.add('printing-comp');
+  const tituloAnterior = document.title;
+  document.title = `Comparativo Mensal ${mesLabel(d.atual)} x ${mesLabel(d.ant)}`.replace(/\//g, '-');
+  const restore = () => {
+    document.body.classList.remove('printing-comp');
+    document.title = tituloAnterior;
+    doc.innerHTML = '';
+    window.removeEventListener('afterprint', restore);
+  };
+  window.addEventListener('afterprint', restore);
+  window.print();
 }
 
 function setupComparativo() {
@@ -1547,7 +1683,12 @@ function setupComparativo() {
     stateC.colab = e.target.value;
     compRender();
   });
+  document.getElementById('cVisao').addEventListener('change', e => {
+    stateC.visao = e.target.value;
+    compRender();
+  });
   document.getElementById('cExport').addEventListener('click', compExport);
+  document.getElementById('cPdf').addEventListener('click', compExportPdf);
 }
 
 /* ---------------- Navegação entre abas ---------------- */

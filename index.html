@@ -287,6 +287,14 @@
             <label for="cColab">Colaborador</label>
             <select id="cColab"><option value="">Todos os colaboradores</option></select>
           </div>
+          <div class="field">
+            <label for="cVisao">Separar análise</label>
+            <select id="cVisao">
+              <option value="todos">Todos (sem separar)</option>
+              <option value="positivos">Positivos</option>
+              <option value="negativos">Negativos</option>
+            </select>
+          </div>
         </div>
         <p class="table-sub" id="cHint"></p>
       </section>
@@ -318,6 +326,10 @@
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
                 Exportar Comparativo
               </button>
+              <button class="btn-ghost" id="cPdf" type="button">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                Exportar PDF
+              </button>
             </div>
           </div>
           <div class="table-scroll">
@@ -347,6 +359,8 @@
         <svg width="34" height="34" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M21 21l-4.3-4.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
         <p id="cEmptyText">Carregando dados…</p>
       </div>
+
+      <div id="cPrintDoc" aria-hidden="true"></div>
 
     </section>
 
