@@ -1266,39 +1266,49 @@ function compBuildDados(recs) {
     [['A', stateC.mesAtual], ['P', stateC.mesAnt]].forEach(([per, key]) => {
       if (!key || !compRecInMonth(rec, key)) return;
       const k = JSON.stringify([compNormNome(rec.nome), rec.loja]);
-      if (!map.has(k)) map.set(k, { nome: rec.nome, loja: rec.loja, h: { A: [], P: [] }, v: { A: 0, P: 0 }, ger: new Set(), sup: new Set() });
+      if (!map.has(k)) map.set(k, { nome: rec.nome, loja: rec.loja, h: { A: [], P: [] }, v: { A: 0, P: 0 }, nv: { A: 0, P: 0 }, ger: new Set(), sup: new Set() });
       const e = map.get(k);
       if (rec.ger) e.ger.add(rec.ger);
       if (rec.sup) e.sup.add(rec.sup);
       if (rec.tipo === 'H') e.h[per].push(rec.val);
-      else e.v[per] += rec.val;
+      else { e.v[per] += rec.val; e.nv[per] += 1; }
     });
   });
 
   const rows = [...map.values()].map(e => {
     const confA = e.h.A.length > 1, confP = e.h.P.length > 1;
+    const hasHA = e.h.A.length > 0, hasHP = e.h.P.length > 0;
+    const hasVA = e.nv.A > 0, hasVP = e.nv.P > 0;
     return {
       nome: e.nome, loja: e.loja, confA, confP, ger: [...e.ger], sup: [...e.sup],
-      hA: confA ? NaN : (e.h.A[0] || 0),
-      hP: confP ? NaN : (e.h.P[0] || 0),
-      vA: Math.round(e.v.A * 100) / 100,
-      vP: Math.round(e.v.P * 100) / 100
+      hasHA, hasHP, hasVA, hasVP,
+      // Sem registro → NaN (nunca 0). Registro com valor 0 continua sendo 0.
+      hA: (confA || !hasHA) ? NaN : e.h.A[0],
+      hP: (confP || !hasHP) ? NaN : e.h.P[0],
+      vA: hasVA ? Math.round(e.v.A * 100) / 100 : NaN,
+      vP: hasVP ? Math.round(e.v.P * 100) / 100 : NaN
     };
-  });
+  }).filter(r => (r.hasHA || r.hasVA) && (r.hasHP || r.hasVP)); // participa = registro no mês atual E no mês anterior
   rows.sort((x, y) =>
     String(x.loja).localeCompare(String(y.loja), 'pt-BR', { numeric: true }) ||
     String(x.nome).localeCompare(String(y.nome), 'pt-BR'));
 
   const sum = (arr, f) => arr.reduce((s, r) => s + f(r), 0);
   const totals = {
-    hA: sum(rows.filter(r => !r.confA && !r.confP), r => r.hA),
-    hP: sum(rows.filter(r => !r.confA && !r.confP), r => r.hP),
-    vA: Math.round(sum(rows, r => r.vA) * 100) / 100,
-    vP: Math.round(sum(rows, r => r.vP) * 100) / 100,
-    conflitos: rows.filter(r => r.confA || r.confP).length
+    hA: sum(rows.filter(compHorasOk), r => r.hA),
+    hP: sum(rows.filter(compHorasOk), r => r.hP),
+    vA: Math.round(sum(rows.filter(compVendasOk), r => r.vA) * 100) / 100,
+    vP: Math.round(sum(rows.filter(compVendasOk), r => r.vP) * 100) / 100,
+    conflitos: rows.filter(r => r.confA || r.confP).length,
+    semHoras: rows.filter(r => !r.confA && !r.confP && !compHorasOk(r)).length,
+    semVendas: rows.filter(r => !compVendasOk(r)).length
   };
   return { rows, totals, atual: stateC.mesAtual, ant: stateC.mesAnt };
 }
+
+/* Comparação de horas / vendas só existe com registro nos DOIS meses (e, em horas, sem Conflito). */
+function compHorasOk(r) { return r.hasHA && r.hasHP && !r.confA && !r.confP; }
+function compVendasOk(r) { return r.hasVA && r.hasVP; }
 
 /* Variação % = ((atual − anterior) / anterior) × 100. Anterior = 0 (ou indefinido) → null ("—").
    O denominador usa o módulo do anterior para que, com saldo negativo, a seta continue
@@ -1345,12 +1355,12 @@ function compRenderCards(d) {
     compCardHtml('Variação das vendas', `<span class="venda-value big ${compMoneyCls(dv)}">${compPctText(pv)}</span>`, `${formatMoney(dv)} de diferença`);
 
   const notice = document.getElementById('cNotice');
-  if (t.conflitos) {
-    notice.textContent = `${t.conflitos} colaborador(es) com mais de um registro de banco de horas no mesmo mês (Conflito): esses saldos não são somados e o colaborador fica fora dos totais e diferenças de horas.`;
-    notice.hidden = false;
-  } else {
-    notice.hidden = true;
-  }
+  const avisos = [];
+  if (t.conflitos) avisos.push(`${t.conflitos} colaborador(es) com mais de um registro de banco de horas no mesmo mês (Conflito): esses saldos não são somados e o colaborador fica fora dos totais e diferenças de horas.`);
+  if (t.semHoras) avisos.push(`${t.semHoras} colaborador(es) sem registro de horas em um dos meses ficam fora dos totais e diferenças de horas.`);
+  if (t.semVendas) avisos.push(`${t.semVendas} colaborador(es) sem registro de vendas em um dos meses ficam fora dos totais e diferenças de vendas.`);
+  notice.textContent = avisos.join(' ');
+  notice.hidden = !avisos.length;
 }
 
 /* Gráfico de 2 barras (anterior → atual) em SVG puro, com linha de zero para saldos negativos. */
@@ -1391,6 +1401,7 @@ function compRenderCharts(d) {
 
 function compHorasCell(v, conf) {
   if (conf) return `<span class="badge badge-noregistro" title="Mais de um registro de banco de horas neste mês">Conflito</span>`;
+  if (!Number.isFinite(v)) return `<span class="banco-value">—</span>`;
   return `<span class="banco-value ${compHorasCls(v)}">${decimalHoursToHHMM(v)}</span>`;
 }
 
@@ -1404,11 +1415,12 @@ function compRenderTable(d) {
 
   const dash = `<span class="banco-value">—</span>`;
   document.getElementById('cTableBody').innerHTML = d.vis.map(r => {
-    const conf = r.confA || r.confP;
-    const dh = conf ? null : r.hA - r.hP;
-    const ph = conf ? null : compPct(r.hA, r.hP);
-    const dv = r.vA - r.vP;
-    const pv = compPct(r.vA, r.vP);
+    const okH = compHorasOk(r), okV = compVendasOk(r);
+    const dh = okH ? r.hA - r.hP : null;
+    const ph = okH ? compPct(r.hA, r.hP) : null;
+    const dv = okV ? r.vA - r.vP : null;
+    const pv = okV ? compPct(r.vA, r.vP) : null;
+    const vCell = v => Number.isFinite(v) ? `<span class="venda-value">${formatMoney(v)}</span>` : `<span class="venda-value">—</span>`;
     return `
       <tr>
         <td class="col-nome">${escapeHtml(r.nome)}</td>
@@ -1417,9 +1429,9 @@ function compRenderTable(d) {
         <td class="num">${compHorasCell(r.hP, r.confP)}</td>
         <td class="num">${dh == null ? dash : `<span class="banco-value ${compHorasCls(dh)}">${decimalHoursToHHMM(dh)}</span>`}</td>
         <td class="num"><span class="banco-value ${dh == null || ph == null ? '' : compHorasCls(dh)}">${compPctText(ph)}</span></td>
-        <td class="num"><span class="venda-value">${formatMoney(r.vA)}</span></td>
-        <td class="num"><span class="venda-value">${formatMoney(r.vP)}</span></td>
-        <td class="num"><span class="venda-value ${compMoneyCls(dv)}">${formatMoney(dv)}</span></td>
+        <td class="num">${vCell(r.vA)}</td>
+        <td class="num">${vCell(r.vP)}</td>
+        <td class="num">${dv == null ? vCell(NaN) : `<span class="venda-value ${compMoneyCls(dv)}">${formatMoney(dv)}</span>`}</td>
         <td class="num"><span class="venda-value ${pv == null ? '' : compMoneyCls(dv)}">${compPctText(pv)}</span></td>
       </tr>`;
   }).join('');
@@ -1437,7 +1449,7 @@ function compHHMM(n, withPlus) {
 
 /* Diferença de horas em minutos (mesma regra do HH:MM exibido); null quando há Conflito. */
 function compDiffMin(r) {
-  return (r.confA || r.confP) ? null : Math.round((r.hA - r.hP) * 60);
+  return compHorasOk(r) ? Math.round((r.hA - r.hP) * 60) : null;
 }
 
 /* 'positivos' → maior diferença primeiro; 'negativos' → mais negativos primeiro; 'todos' → ordem original. */
@@ -1535,14 +1547,16 @@ function compExport() {
   ];
   const lines = [headers.join(';')];
   d.vis.forEach(r => {
-    const conf = r.confA || r.confP;
+    const okH = compHorasOk(r), okV = compVendasOk(r);
+    const hTxt = (v, c) => c ? 'Conflito' : (Number.isFinite(v) ? horasTxt(v) : '—');
+    const vTxt = v => Number.isFinite(v) ? dec(v, 2) : '—';
     lines.push([
       r.nome, lojaLabel(r.loja),
-      r.confA ? 'Conflito' : horasTxt(r.hA),
-      r.confP ? 'Conflito' : horasTxt(r.hP),
-      conf ? '—' : difTxt(r.hA - r.hP),
-      conf ? '—' : pct(compPct(r.hA, r.hP)),
-      dec(r.vA, 2), dec(r.vP, 2), dec(r.vA - r.vP, 2), pct(compPct(r.vA, r.vP))
+      hTxt(r.hA, r.confA),
+      hTxt(r.hP, r.confP),
+      okH ? difTxt(r.hA - r.hP) : '—',
+      okH ? pct(compPct(r.hA, r.hP)) : '—',
+      vTxt(r.vA), vTxt(r.vP), okV ? dec(r.vA - r.vP, 2) : '—', okV ? pct(compPct(r.vA, r.vP)) : '—'
     ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(';'));
   });
   const blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
@@ -1566,10 +1580,10 @@ function compUnion(rows, key) {
 
 function compPrintTable(rows, ma, mp) {
   const trs = rows.map(r => {
-    const conf = r.confA || r.confP;
-    const dh = conf ? null : r.hA - r.hP;
-    const ph = conf ? null : compPct(r.hA, r.hP);
-    const hCell = (v, c) => c ? '<span class="cp-conf">Conflito</span>' : `<span class="banco-value ${compHorasCls(v)}">${compHHMM(v, false)}</span>`;
+    const okH = compHorasOk(r);
+    const dh = okH ? r.hA - r.hP : null;
+    const ph = okH ? compPct(r.hA, r.hP) : null;
+    const hCell = (v, c) => c ? '<span class="cp-conf">Conflito</span>' : (!Number.isFinite(v) ? '—' : `<span class="banco-value ${compHorasCls(v)}">${compHHMM(v, false)}</span>`);
     return `
       <tr>
         <td class="cp-nome">${escapeHtml(r.nome)}</td>
