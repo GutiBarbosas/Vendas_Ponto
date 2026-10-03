@@ -1144,34 +1144,436 @@ async function initMensal() {
     refreshMensalPeriodOptions();
     renderMensalTree();
     refreshConsolidado();
+    compOnData('geral', true);
   } catch (err) {
     console.error(err);
+    compOnData('geral', false);
     document.getElementById('mTreePanel').hidden = true;
     document.getElementById('mEmptyState').hidden = false;
     document.getElementById('mEmptyState').querySelector('p').textContent = 'Erro ao carregar dados da planilha GERAL';
   }
 }
 
+/* ==========================================================================
+   Comparativo Mensal — compara dois meses por colaborador (horas × vendas).
+   NÃO cria base nova nem refaz cálculos: usa as MESMAS linhas já carregadas
+   (state.rows = aba BASE → VENDA; stateM.rows = aba GERAL → BANCO) e reutiliza
+   parseDecimalHours, decimalHoursToHHMM, formatMoney, lojaLabel, mesLabel,
+   MES_ORDER, uniqueSorted e populateSelect.
+   - Horas  = BANCO (saldo do mês). Seguindo a regra já adotada em #mensal, saldos
+     NUNCA são somados: mais de um registro no mesmo mês é "Conflito" (fica de fora
+     de totais e diferenças de horas).
+   - Vendas = soma de VENDA de todos os dias do mês (consolidação por colaborador+loja).
+   - Colaborador sem registro em um dos meses = 0 nesse mês.
+   ========================================================================== */
+
+const stateC = { mesAtual: '', mesAnt: '', supervisor: '', gerente: '', loja: '', colab: '', touched: false };
+const compLoad = { base: 'pendente', geral: 'pendente' }; // 'pendente' | 'ok' | 'erro'
+let compLast = null; // último resultado exibido (usado pela exportação)
+
+/* Chamado quando cada fonte termina de carregar (sucesso ou erro). */
+function compOnData(src, ok) {
+  compLoad[src] = ok ? 'ok' : 'erro';
+  compRefresh();
+}
+
+function compNormNome(s) { return String(s || '').trim().replace(/\s+/g, ' ').toUpperCase(); }
+function compNormLoja(s) {
+  const t = String(s == null ? '' : s).trim();
+  const n = Number(t);
+  return (t !== '' && !Number.isNaN(n)) ? String(n) : t;
+}
+
+/* MÊS da aba GERAL: normalmente abreviação sem ano (JAN…DEZ); aceita também AAAA-MM, MM/AAAA e MÊS/AAAA. */
+function compParseMesGeral(raw) {
+  const s = mesNorm(raw);
+  if (!s) return null;
+  const idx = MES_ORDER.indexOf(s);
+  if (idx !== -1) return { mm: idx + 1, yyyy: null };
+  let m = s.match(/^(\d{4})-(\d{1,2})$/);
+  if (m) return (+m[2] >= 1 && +m[2] <= 12) ? { mm: +m[2], yyyy: +m[1] } : null;
+  m = s.match(/^(\d{1,2})\/(\d{4})$/);
+  if (m) return (+m[1] >= 1 && +m[1] <= 12) ? { mm: +m[1], yyyy: +m[2] } : null;
+  m = s.match(/^([A-Z]{3})[\/\-. ](\d{2}|\d{4})$/);
+  if (m && MES_ORDER.includes(m[1])) return { mm: MES_ORDER.indexOf(m[1]) + 1, yyyy: m[2].length === 2 ? 2000 + +m[2] : +m[2] };
+  return null;
+}
+
+/* Registros unificados das duas fontes já carregadas (sem alterar nenhuma delas). */
+function compBuildRecords() {
+  const recs = [];
+  state.rows.forEach(r => {
+    const key = String(r.DT || '').slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(key)) return;
+    const v = Number(r.VENDA);
+    recs.push({ tipo: 'V', nome: r.NOME, loja: compNormLoja(r.LOJA), sup: r.SUPER, ger: r.GERENTE, key, val: Number.isNaN(v) ? 0 : v });
+  });
+  stateM.rows.forEach(r => {
+    const p = compParseMesGeral(r[COL.MES]);
+    const h = parseDecimalHours(r[COL.BANCO]);
+    if (!p || Number.isNaN(h)) return;
+    recs.push({ tipo: 'H', nome: r[COL.NOME], loja: compNormLoja(r[COL.LOJA]), sup: r[COL.SUPER], ger: r[COL.GERENTE], mm: p.mm, yyyy: p.yyyy, val: h });
+  });
+  return recs;
+}
+
+function compRecInMonth(rec, key) {
+  if (rec.tipo === 'V') return rec.key === key;
+  return rec.mm === +key.slice(5, 7) && (rec.yyyy == null || rec.yyyy === +key.slice(0, 4));
+}
+
+/* Meses disponíveis ('AAAA-MM'), do mais recente para o mais antigo. */
+function compMonthOptions(recs) {
+  const keys = new Set();
+  let anoRef = 0;
+  recs.forEach(r => {
+    if (r.tipo === 'V') { keys.add(r.key); anoRef = Math.max(anoRef, +r.key.slice(0, 4)); }
+    else if (r.yyyy != null) { keys.add(`${r.yyyy}-${String(r.mm).padStart(2, '0')}`); anoRef = Math.max(anoRef, r.yyyy); }
+  });
+  if (!anoRef) anoRef = new Date().getFullYear();
+  // Meses da aba GERAL sem ano: assumem o ano mais recente da base
+  recs.forEach(r => { if (r.tipo === 'H' && r.yyyy == null) keys.add(`${anoRef}-${String(r.mm).padStart(2, '0')}`); });
+  return [...keys].sort().reverse();
+}
+
+function compFilterRecs(recs, upTo) {
+  return recs.filter(r =>
+    (!stateC.supervisor || r.sup === stateC.supervisor) &&
+    (!stateC.gerente || r.ger === stateC.gerente) &&
+    (upTo === 'loja' || !stateC.loja || r.loja === stateC.loja) &&
+    (upTo !== 'all' || !stateC.colab || compNormNome(r.nome) === compNormNome(stateC.colab))
+  );
+}
+
+function compRefreshColab(recs) {
+  const el = document.getElementById('cColab');
+  populateSelect(el, uniqueSorted(compFilterRecs(recs, 'colab'), 'nome'));
+  stateC.colab = el.value;
+}
+
+function compRefreshLoja(recs) {
+  const el = document.getElementById('cLoja');
+  populateSelect(el, uniqueSorted(compFilterRecs(recs, 'loja'), 'loja'), lojaLabel);
+  stateC.loja = el.value;
+  compRefreshColab(recs);
+}
+
+/* Consolida por colaborador+loja nos dois meses. */
+function compBuildDados(recs) {
+  const filtrados = compFilterRecs(recs, 'all');
+  const map = new Map();
+  filtrados.forEach(rec => {
+    [['A', stateC.mesAtual], ['P', stateC.mesAnt]].forEach(([per, key]) => {
+      if (!key || !compRecInMonth(rec, key)) return;
+      const k = JSON.stringify([compNormNome(rec.nome), rec.loja]);
+      if (!map.has(k)) map.set(k, { nome: rec.nome, loja: rec.loja, h: { A: [], P: [] }, v: { A: 0, P: 0 } });
+      const e = map.get(k);
+      if (rec.tipo === 'H') e.h[per].push(rec.val);
+      else e.v[per] += rec.val;
+    });
+  });
+
+  const rows = [...map.values()].map(e => {
+    const confA = e.h.A.length > 1, confP = e.h.P.length > 1;
+    return {
+      nome: e.nome, loja: e.loja, confA, confP,
+      hA: confA ? NaN : (e.h.A[0] || 0),
+      hP: confP ? NaN : (e.h.P[0] || 0),
+      vA: Math.round(e.v.A * 100) / 100,
+      vP: Math.round(e.v.P * 100) / 100
+    };
+  });
+  rows.sort((x, y) =>
+    String(x.loja).localeCompare(String(y.loja), 'pt-BR', { numeric: true }) ||
+    String(x.nome).localeCompare(String(y.nome), 'pt-BR'));
+
+  const sum = (arr, f) => arr.reduce((s, r) => s + f(r), 0);
+  const totals = {
+    hA: sum(rows.filter(r => !r.confA && !r.confP), r => r.hA),
+    hP: sum(rows.filter(r => !r.confA && !r.confP), r => r.hP),
+    vA: Math.round(sum(rows, r => r.vA) * 100) / 100,
+    vP: Math.round(sum(rows, r => r.vP) * 100) / 100,
+    conflitos: rows.filter(r => r.confA || r.confP).length
+  };
+  return { rows, totals, atual: stateC.mesAtual, ant: stateC.mesAnt };
+}
+
+/* Variação % = ((atual − anterior) / anterior) × 100. Anterior = 0 (ou indefinido) → null ("—").
+   O denominador usa o módulo do anterior para que, com saldo negativo, a seta continue
+   indicando melhora/piora (para anterior positivo é exatamente a fórmula pedida). */
+function compPct(cur, prev) {
+  if (!Number.isFinite(cur) || !Number.isFinite(prev) || prev === 0) return null;
+  return ((cur - prev) / Math.abs(prev)) * 100;
+}
+function compPctText(p) {
+  if (p == null) return '—';
+  const r = Math.round(p * 10) / 10;
+  const t = Math.abs(r).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  return (r > 0 ? '+' : (r < 0 ? '-' : '')) + t + '%';
+}
+function compSignCls(n, scale) {
+  const r = Math.round(n * scale);
+  return r > 0 ? 'positive' : (r < 0 ? 'negative' : '');
+}
+function compHorasCls(n) { return compSignCls(n, 60); }   // sinal por minuto (igual ao HH:MM exibido)
+function compMoneyCls(n) { return compSignCls(n, 100); }  // sinal por centavo
+
+/* ---- Renderização ---- */
+
+function compCardHtml(label, valueHtml, sub) {
+  return `
+    <div class="comp-card">
+      <span class="info-label">${label}</span>
+      <span class="comp-card-value">${valueHtml}</span>
+      <span class="comp-card-sub">${sub || '&nbsp;'}</span>
+    </div>`;
+}
+
+function compRenderCards(d) {
+  const t = d.totals;
+  const ma = mesLabel(d.atual), mp = mesLabel(d.ant);
+  const dh = t.hA - t.hP, dv = t.vA - t.vP;
+  const ph = compPct(t.hA, t.hP), pv = compPct(t.vA, t.vP);
+  document.getElementById('cCards').innerHTML =
+    compCardHtml(`Total de horas · ${ma}`, `<span class="banco-value big ${compHorasCls(t.hA)}">${decimalHoursToHHMM(t.hA)}</span>`, 'mês atual') +
+    compCardHtml(`Total de horas · ${mp}`, `<span class="banco-value big ${compHorasCls(t.hP)}">${decimalHoursToHHMM(t.hP)}</span>`, 'mês anterior') +
+    compCardHtml('Variação das horas', `<span class="banco-value big ${compHorasCls(dh)}">${compPctText(ph)}</span>`, `${decimalHoursToHHMM(dh)} de diferença`) +
+    compCardHtml(`Total de vendas · ${ma}`, `<span class="venda-value big">${formatMoney(t.vA)}</span>`, 'mês atual') +
+    compCardHtml(`Total de vendas · ${mp}`, `<span class="venda-value big">${formatMoney(t.vP)}</span>`, 'mês anterior') +
+    compCardHtml('Variação das vendas', `<span class="venda-value big ${compMoneyCls(dv)}">${compPctText(pv)}</span>`, `${formatMoney(dv)} de diferença`);
+
+  const notice = document.getElementById('cNotice');
+  if (t.conflitos) {
+    notice.textContent = `${t.conflitos} colaborador(es) com mais de um registro de banco de horas no mesmo mês (Conflito): esses saldos não são somados e o colaborador fica fora dos totais e diferenças de horas.`;
+    notice.hidden = false;
+  } else {
+    notice.hidden = true;
+  }
+}
+
+/* Gráfico de 2 barras (anterior → atual) em SVG puro, com linha de zero para saldos negativos. */
+function compBarChart(valP, valA, fmt, labelP, labelA, aria) {
+  const w = 360, h = 200, padTop = 28, padBottom = 44;
+  const lo = Math.min(0, valP, valA), hi = Math.max(0, valP, valA);
+  const span = (hi - lo) || 1;
+  const plotH = h - padTop - padBottom;
+  const y = v => padTop + ((hi - v) / span) * plotH;
+  const zeroY = y(0);
+  const bw = 96;
+  const bars = [
+    { v: valP, cx: w * 0.3, cls: 'comp-bar-p', label: labelP },
+    { v: valA, cx: w * 0.7, cls: 'comp-bar-a', label: labelA }
+  ].map(b => {
+    const yv = y(b.v);
+    const top = Math.min(yv, zeroY), height = Math.abs(yv - zeroY);
+    const labY = b.v >= 0 ? yv - 7 : yv + 15;
+    return `
+      <rect x="${(b.cx - bw / 2).toFixed(1)}" y="${top.toFixed(1)}" width="${bw}" height="${height.toFixed(1)}" rx="4" class="${b.cls}"><title>${b.label}: ${fmt(b.v)}</title></rect>
+      <text x="${b.cx.toFixed(1)}" y="${labY.toFixed(1)}" text-anchor="middle" class="comp-bar-value">${fmt(b.v)}</text>
+      <text x="${b.cx.toFixed(1)}" y="${h - 10}" text-anchor="middle" class="comp-axis-label">${b.label}</text>`;
+  }).join('');
+  return `
+    <svg viewBox="0 0 ${w} ${h}" class="comp-chart-svg" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${aria}">
+      <line x1="16" y1="${zeroY.toFixed(1)}" x2="${w - 16}" y2="${zeroY.toFixed(1)}" class="spark-zero"/>
+      ${bars}
+    </svg>`;
+}
+
+function compRenderCharts(d) {
+  const t = d.totals, ma = mesLabel(d.atual), mp = mesLabel(d.ant);
+  document.getElementById('cChartHoras').innerHTML =
+    compBarChart(t.hP, t.hA, decimalHoursToHHMM, mp, ma, `Total de horas: ${mp} × ${ma}`);
+  document.getElementById('cChartVendas').innerHTML =
+    compBarChart(t.vP, t.vA, formatMoney, mp, ma, `Total de vendas: ${mp} × ${ma}`);
+}
+
+function compHorasCell(v, conf) {
+  if (conf) return `<span class="badge badge-noregistro" title="Mais de um registro de banco de horas neste mês">Conflito</span>`;
+  return `<span class="banco-value ${compHorasCls(v)}">${decimalHoursToHHMM(v)}</span>`;
+}
+
+function compRenderTable(d) {
+  const ma = mesLabel(d.atual), mp = mesLabel(d.ant);
+  document.getElementById('cThHA').textContent = `Horas · ${ma}`;
+  document.getElementById('cThHP').textContent = `Horas · ${mp}`;
+  document.getElementById('cThVA').textContent = `Vendas · ${ma}`;
+  document.getElementById('cThVP').textContent = `Vendas · ${mp}`;
+  document.getElementById('cRowCount').textContent = `${d.rows.length} colaborador(es) · ${mp} × ${ma}`;
+
+  const dash = `<span class="banco-value">—</span>`;
+  document.getElementById('cTableBody').innerHTML = d.rows.map(r => {
+    const conf = r.confA || r.confP;
+    const dh = conf ? null : r.hA - r.hP;
+    const ph = conf ? null : compPct(r.hA, r.hP);
+    const dv = r.vA - r.vP;
+    const pv = compPct(r.vA, r.vP);
+    return `
+      <tr>
+        <td class="col-nome">${escapeHtml(r.nome)}</td>
+        <td>${lojaLabel(r.loja)}</td>
+        <td class="num">${compHorasCell(r.hA, r.confA)}</td>
+        <td class="num">${compHorasCell(r.hP, r.confP)}</td>
+        <td class="num">${dh == null ? dash : `<span class="banco-value ${compHorasCls(dh)}">${decimalHoursToHHMM(dh)}</span>`}</td>
+        <td class="num"><span class="banco-value ${dh == null || ph == null ? '' : compHorasCls(dh)}">${compPctText(ph)}</span></td>
+        <td class="num"><span class="venda-value">${formatMoney(r.vA)}</span></td>
+        <td class="num"><span class="venda-value">${formatMoney(r.vP)}</span></td>
+        <td class="num"><span class="venda-value ${compMoneyCls(dv)}">${formatMoney(dv)}</span></td>
+        <td class="num"><span class="venda-value ${pv == null ? '' : compMoneyCls(dv)}">${compPctText(pv)}</span></td>
+      </tr>`;
+  }).join('');
+}
+
+function compShowEmpty(text) {
+  document.getElementById('cContent').hidden = true;
+  document.getElementById('cEmptyState').hidden = false;
+  document.getElementById('cEmptyText').textContent = text;
+  compLast = null;
+}
+
+function compRender() {
+  const recs = compBuildRecords();
+  const d = compBuildDados(recs);
+  document.getElementById('cHint').textContent =
+    stateC.mesAtual === stateC.mesAnt ? 'Atenção: os dois meses selecionados são iguais.' : '';
+
+  if (!d.rows.length) {
+    compShowEmpty('Nenhum dado encontrado para os meses e filtros selecionados.');
+    return;
+  }
+  compLast = d;
+  compRenderCards(d);
+  compRenderCharts(d);
+  compRenderTable(d);
+  document.getElementById('cEmptyState').hidden = true;
+  document.getElementById('cContent').hidden = false;
+}
+
+/* Atualiza opções (meses e filtros) a partir dos dados já carregados e redesenha. */
+function compRefresh() {
+  if (compLoad.base === 'erro' || compLoad.geral === 'erro') {
+    compShowEmpty('Não foi possível carregar todos os dados (BASE e GERAL); o comparativo está indisponível.');
+    return;
+  }
+  if (compLoad.base === 'pendente' || compLoad.geral === 'pendente') {
+    compShowEmpty('Carregando dados…');
+    return;
+  }
+
+  const recs = compBuildRecords();
+  const meses = compMonthOptions(recs);
+  if (!meses.length) { compShowEmpty('Nenhum mês encontrado na base de dados.'); return; }
+
+  const elA = document.getElementById('cMesAtual'), elP = document.getElementById('cMesAnterior');
+  if (!stateC.touched) { elA.value = ''; elP.value = ''; }
+  populateSelect(elA, meses, mesLabel);
+  populateSelect(elP, meses, mesLabel);
+  if (!stateC.touched || !meses.includes(elA.value)) {
+    elA.value = meses[0];
+    elP.value = meses[1] || meses[0];
+  }
+  stateC.mesAtual = elA.value;
+  stateC.mesAnt = elP.value;
+
+  populateSelect(document.getElementById('cSupervisor'), uniqueSorted(recs, 'sup'));
+  populateSelect(document.getElementById('cGerente'), uniqueSorted(recs, 'ger'));
+  stateC.supervisor = document.getElementById('cSupervisor').value;
+  stateC.gerente = document.getElementById('cGerente').value;
+  compRefreshLoja(recs);
+  compRender();
+}
+
+/* ---- Exportação (CSV, mesmo padrão do "Exportar CSV" existente; não altera as exportações atuais) ---- */
+
+function compExport() {
+  const d = compLast;
+  if (!d || !d.rows.length) return;
+  const ma = mesLabel(d.atual), mp = mesLabel(d.ant);
+  const dec = (n, dig) => n.toFixed(dig).replace('.', ',');
+  const horas = n => String(Number(n.toFixed(6))).replace('.', ',');
+  const pct = p => p == null ? '—' : dec(p, 2);
+  const headers = [
+    'COLABORADOR', 'LOJA',
+    `HORAS ${ma} (h)`, `HORAS ${mp} (h)`, 'DIFERENÇA HORAS (h)', 'VARIAÇÃO HORAS (%)',
+    `VENDAS ${ma}`, `VENDAS ${mp}`, 'DIFERENÇA VENDAS', 'VARIAÇÃO VENDAS (%)'
+  ];
+  const lines = [headers.join(';')];
+  d.rows.forEach(r => {
+    const conf = r.confA || r.confP;
+    lines.push([
+      r.nome, lojaLabel(r.loja),
+      r.confA ? 'Conflito' : horas(r.hA),
+      r.confP ? 'Conflito' : horas(r.hP),
+      conf ? '—' : horas(r.hA - r.hP),
+      conf ? '—' : pct(compPct(r.hA, r.hP)),
+      dec(r.vA, 2), dec(r.vP, 2), dec(r.vA - r.vP, 2), pct(compPct(r.vA, r.vP))
+    ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(';'));
+  });
+  const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `comparativo_mensal_${d.atual}_vs_${d.ant}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function setupComparativo() {
+  const onMes = () => {
+    stateC.touched = true;
+    stateC.mesAtual = document.getElementById('cMesAtual').value;
+    stateC.mesAnt = document.getElementById('cMesAnterior').value;
+    compRender();
+  };
+  document.getElementById('cMesAtual').addEventListener('change', onMes);
+  document.getElementById('cMesAnterior').addEventListener('change', onMes);
+  document.getElementById('cSupervisor').addEventListener('change', e => {
+    stateC.supervisor = e.target.value;
+    compRefreshLoja(compBuildRecords());
+    compRender();
+  });
+  document.getElementById('cGerente').addEventListener('change', e => {
+    stateC.gerente = e.target.value;
+    compRefreshLoja(compBuildRecords());
+    compRender();
+  });
+  document.getElementById('cLoja').addEventListener('change', e => {
+    stateC.loja = e.target.value;
+    compRefreshColab(compBuildRecords());
+    compRender();
+  });
+  document.getElementById('cColab').addEventListener('change', e => {
+    stateC.colab = e.target.value;
+    compRender();
+  });
+  document.getElementById('cExport').addEventListener('click', compExport);
+}
+
 /* ---------------- Navegação entre abas ---------------- */
 
 function showPage(page) {
   const isMensal = page === 'mensal';
-  document.getElementById('pageRegistro').hidden = isMensal;
+  const isComp = page === 'comparativo';
+  document.getElementById('pageRegistro').hidden = isMensal || isComp;
   document.getElementById('pageMensal').hidden = !isMensal;
-  document.getElementById('navRegistro').classList.toggle('active', !isMensal);
+  document.getElementById('pageComparativo').hidden = !isComp;
+  document.getElementById('navRegistro').classList.toggle('active', !isMensal && !isComp);
   document.getElementById('navMensal').classList.toggle('active', isMensal);
-  document.getElementById('pageTitle').textContent = isMensal
-    ? 'Acompanhamento Mensal por Colaborador'
-    : 'Registro e Venda por Colaborador';
-  document.getElementById('crumbActive').textContent = isMensal
-    ? 'Acompanhamento mensal'
-    : 'Acompanhamento diário';
+  document.getElementById('navComparativo').classList.toggle('active', isComp);
+  document.getElementById('pageTitle').textContent = isComp
+    ? 'Comparativo Mensal por Colaborador'
+    : (isMensal ? 'Acompanhamento Mensal por Colaborador' : 'Registro e Venda por Colaborador');
+  document.getElementById('crumbActive').textContent = isComp
+    ? 'Comparativo mensal'
+    : (isMensal ? 'Acompanhamento mensal' : 'Acompanhamento diário');
   document.getElementById('sidebar').classList.remove('open');
   document.getElementById('sidebarOverlay').classList.remove('show');
+  if (isComp) compRefresh();
 }
 
 function setupRouter() {
-  const applyHash = () => showPage(window.location.hash === '#mensal' ? 'mensal' : 'registro');
+  const applyHash = () => showPage(window.location.hash === '#mensal' ? 'mensal' : (window.location.hash === '#comparativo' ? 'comparativo' : 'registro'));
   window.addEventListener('hashchange', applyHash);
   applyHash();
 }
@@ -1320,6 +1722,7 @@ async function init() {
   setupSortHeaders();
   setupExport();
   setupSidebarToggle();
+  setupComparativo();
   setupRouter();
   initMensal();
 
@@ -1340,8 +1743,10 @@ async function init() {
     const hh = String(now.getHours()).padStart(2, '0');
     const mm = String(now.getMinutes()).padStart(2, '0');
     loadedText.textContent = `${state.rows.length} registros carregados às ${hh}:${mm}`;
+    compOnData('base', true);
   } catch (err) {
     console.error(err);
+    compOnData('base', false);
     loadedChip.classList.add('stale');
     loadedText.textContent = 'Erro ao carregar dados da planilha BASE';
     document.getElementById('rowCount').textContent = 'Não foi possível carregar os dados.';

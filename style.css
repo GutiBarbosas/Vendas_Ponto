@@ -809,3 +809,54 @@ tbody td.col-data { font-family: var(--mono); font-size: 12.3px; color: var(--te
   /* Evita cortar uma loja ou colaborador no meio, entre páginas */
   .mensal-store, .mensal-colab { break-inside: avoid; page-break-inside: avoid; }
 }
+
+/* ---------------- Comparativo Mensal ---------------- */
+
+.comp-stack, #cContent { display: flex; flex-direction: column; gap: 18px; }
+.comp-stack[hidden], #cContent[hidden] { display: none !important; }
+#cHint:empty { display: none; }
+#cHint { margin-top: 12px; color: var(--amber); }
+
+.comp-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.comp-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 14px 16px;
+  background: var(--panel-bg);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+}
+
+.comp-card-value { min-width: 0; }
+.banco-value.big, .venda-value.big { font-size: 20px; font-weight: 700; }
+.comp-card-sub { font-size: 12px; color: var(--text-faint); }
+.comp-notice { margin: 0; color: var(--amber); }
+
+.comp-charts {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 18px;
+}
+
+.comp-chart-title { margin: 0 0 10px; font-size: 14.5px; font-weight: 700; }
+.comp-chart-svg { width: 100%; height: auto; max-height: 240px; display: block; }
+.comp-bar-a { fill: var(--accent); }
+.comp-bar-p { fill: var(--text-faint); }
+.comp-bar-value { font-size: 12px; font-weight: 600; fill: var(--text); font-family: var(--mono); }
+.comp-axis-label { font-size: 11px; fill: var(--text-faint); font-family: var(--font); }
+
+@media (max-width: 980px) {
+  .comp-cards { grid-template-columns: repeat(2, 1fr); }
+  .comp-charts { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .comp-cards { grid-template-columns: 1fr; }
+}
+#cEmptyState[hidden] { display: none; }
