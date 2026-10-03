@@ -1541,7 +1541,7 @@ function compExport() {
   const horasTxt = n => `="${compHHMM(n, false)}"`;
   const difTxt = n => `="${compHHMM(n, true)}"`;
   const headers = [
-    'COLABORADOR', 'LOJA',
+    'COLABORADOR', 'LOJA', 'GERENTE', 'SUPERVISOR',
     `HORAS ${ma}`, `HORAS ${mp}`, 'DIFERENÇA HORAS', 'VARIAÇÃO HORAS (%)',
     `VENDAS ${ma}`, `VENDAS ${mp}`, 'DIFERENÇA VENDAS', 'VARIAÇÃO VENDAS (%)'
   ];
@@ -1551,7 +1551,7 @@ function compExport() {
     const hTxt = (v, c) => c ? 'Conflito' : (Number.isFinite(v) ? horasTxt(v) : '—');
     const vTxt = v => Number.isFinite(v) ? dec(v, 2) : '—';
     lines.push([
-      r.nome, lojaLabel(r.loja),
+      r.nome, lojaLabel(r.loja), compUnion([r], 'ger'), compUnion([r], 'sup'),
       hTxt(r.hA, r.confA),
       hTxt(r.hP, r.confP),
       okH ? difTxt(r.hA - r.hP) : '—',
